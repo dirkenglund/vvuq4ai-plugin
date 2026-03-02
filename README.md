@@ -12,14 +12,17 @@ VVUQ4AI checks scientific, engineering, and mathematical claims for accuracy usi
 
 ## Installation
 
-```bash
-claude plugin add /path/to/vvuq4ai-plugin
+### From marketplace (recommended)
+
+```
+/plugin marketplace add dirkenglund/vvuq4ai-plugin
+/plugin install vvuq4ai@vvuq4ai
 ```
 
-Or add to your project's `.claude/plugins/`:
+### Local development
 
 ```bash
-cp -r vvuq4ai-plugin ~/.claude/plugins/vvuq4ai
+claude --plugin-dir ./vvuq4ai-plugin
 ```
 
 ## Usage
