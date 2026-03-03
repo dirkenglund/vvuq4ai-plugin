@@ -8,7 +8,7 @@
     "url": "https://vvuq.dirkenglund.org"
   },
   "homepage": "https://vvuq.dirkenglund.org",
-  "repository": "https://github.com/dirkenglund/vvuq-mcp",
+  "repository": "https://github.com/dirkenglund/vvuq4ai-plugin",
   "license": "MIT",
   "keywords": ["verification", "validation", "stem", "physics", "ieee", "standards", "math", "fact-checking"],
   "mcpServers": "./.mcp.json"

@@ -23,15 +23,17 @@ Call the `vvuq_resolve` MCP tool with the claim text:
 vvuq_resolve(query="<claim to verify>")
 ```
 
+If the call fails or times out, note that the claim could not be machine-verified and proceed with appropriate caveats.
+
 The response includes:
 - `results`: Related knowledge base entries (for context)
-- `verification`: Structured verdict with checks
+- `verification`: Structured verdict with checks (not all check types fire for every claim)
 
 ## Verification Verdicts
 
 | Verdict | Meaning | Action |
 |---------|---------|--------|
-| `verified` | All checks pass | State claim with confidence |
+| `verified` | Checks that fired all passed | State claim, noting it was machine-checked (not absolute proof) |
 | `flagged` | Error detected | Correct the claim, cite the check detail |
 | `uncertain` | Mixed signals | Qualify the claim, note uncertainty |
 | `unverifiable` | No applicable checks | Proceed but note claim is unverified |
@@ -44,7 +46,8 @@ When generating STEM content:
 2. For key claims, call `vvuq_resolve` to verify
 3. If flagged: correct the error inline, cite the verification
 4. If uncertain: add a caveat noting the uncertainty
-5. If verified: optionally note it was machine-verified
+5. If verified: optionally note it was machine-checked
+6. If the service is unavailable: note the claim could not be verified
 
 ## Example Flow
 
@@ -67,5 +70,5 @@ Corrected output:
 - **Physics**: Constants (c, h, k_B, G, e, m_e), equations, dimensional analysis
 - **Mathematics**: Identities, derivatives, integrals
 - **IEEE 802.3**: Ethernet channel compliance (COM, insertion loss, TDECQ, return loss, etc.)
-- **NSF Biosketch**: Grant format compliance
+- **NSF Biosketch**: Grant format compliance (section requirements, page limits)
 - **Photonics/EM**: Device parameters, simulation validation
