@@ -17,7 +17,7 @@ import pytest
 PLUGIN_ROOT = pathlib.Path(__file__).parent.parent.parent
 
 # Directories that are NOT part of the distributed plugin
-_EXCLUDED_DIRS = {".git", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
+_EXCLUDED_DIRS = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
 
 # ---------------------------------------------------------------------------
 # Helpers

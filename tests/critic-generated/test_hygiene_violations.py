@@ -20,7 +20,7 @@ PLUGIN_ROOT = Path(__file__).parent.parent.parent.resolve()
 # Directories to skip when scanning.
 # .git: git internals are never distributed
 # __pycache__, .pytest_cache, .benchmarks: created at runtime by pytest, not pre-existing
-SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".benchmarks"}
+SKIP_DIRS = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks"}
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
 

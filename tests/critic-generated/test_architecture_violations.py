@@ -898,7 +898,7 @@ class TestNoServerSideAssets:
     def test_no_server_side_files_anywhere_in_tree(self):
         """Scan the entire plugin tree (excluding .git and tests) for
         server-side file types that should not be distributed."""
-        skip_dirs = {".git", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
+        skip_dirs = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
         violations = []
         for fpath in PLUGIN_ROOT.rglob("*"):
             if not fpath.is_file():
@@ -957,7 +957,7 @@ class TestDistributionFileTypes:
     def test_all_distribution_files_are_recognized_types(self):
         """Every file in the distribution (excluding tests, .git, caches)
         must be a recognized plugin file type."""
-        skip_dirs = {".git", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
+        skip_dirs = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
         unrecognized = []
         for fpath in PLUGIN_ROOT.rglob("*"):
             if not fpath.is_file():
@@ -1051,7 +1051,7 @@ class TestSecurityScannerCoverage:
         }
         security_scannable_names = {".gitignore", "LICENSE"}
 
-        skip_dirs = {".git", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
+        skip_dirs = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
         uncovered = []
         for fpath in PLUGIN_ROOT.rglob("*"):
             if not fpath.is_file():
@@ -1120,7 +1120,7 @@ class TestNoMcpServerDuplication:
     def test_no_server_content_in_distribution(self):
         """Scan all distribution files for patterns that indicate
         server-side content that belongs in the MCP server repo."""
-        skip_dirs = {".git", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
+        skip_dirs = {".git", ".github", "__pycache__", ".pytest_cache", ".benchmarks", "tests"}
         violations = []
         for fpath in PLUGIN_ROOT.rglob("*"):
             if not fpath.is_file():

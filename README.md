@@ -1,16 +1,29 @@
 # VVUQ4AI — Claude Code Plugin
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://github.com/dirkenglund/vvuq4ai-plugin/actions/workflows/tests.yml/badge.svg)](https://github.com/dirkenglund/vvuq4ai-plugin/actions/workflows/tests.yml)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](.claude-plugin/plugin.json)
+
 Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks.
 
-## What It Does
+## How It Works
 
-VVUQ4AI checks scientific, engineering, and mathematical claims for accuracy using:
-
-- **Math verification** — Physical constants, derivatives, dimensional analysis (SymPy)
-- **Standards compliance** — IEEE 802.3 Ethernet channel rules, NSF Biosketch format
-- **Knowledge cross-reference** — Semantic search against curated knowledge nodes from physics, math, CS, and photonics
+1. You type `/verify <claim>` (or the skill auto-triggers on STEM content)
+2. Claude calls `vvuq_resolve()` on the VVUQ MCP service via SSE
+3. The service runs up to 3 checks: math (SymPy), standards (IEEE/NSF), and knowledge base semantic search
+4. Returns a verdict, confidence score, and individual check results
 
 Not all checks fire for every claim — the system applies whichever checks are relevant to the input.
+
+## What Can It Verify?
+
+| Domain | Examples |
+|--------|----------|
+| **Physics constants** | Speed of light, Planck's constant, Boltzmann constant, gravitational constant, electron mass |
+| **Mathematical identities** | Derivatives, integrals, trigonometric identities, dimensional analysis |
+| **IEEE 802.3 Ethernet** | COM threshold (>= 3.0 dB), insertion loss, TDECQ, return loss per IEEE 802.3ck |
+| **NSF Biosketch** | Section requirements, page limits, format compliance |
+| **Photonics/EM** | Device parameters, simulation validation, waveguide properties |
 
 ## Installation
 
@@ -58,6 +71,7 @@ Auto-activates when Claude generates numeric scientific claims, unit conversions
 
 - Claude Code CLI
 - Internet access (connects to `https://vvuq.dirkenglund.org/mcp/`)
+- No API key or configuration needed
 
 ## Access
 
