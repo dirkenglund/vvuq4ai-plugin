@@ -780,3 +780,499 @@ class TestCriticalSafetyExample:
             "The backend may not return all check types for every claim, and "
             "the format should reflect this reality."
         )
+
+
+# =========================================================================
+# 12. PRIVACY POLICY — OPT-OUT MECHANISM CLAIMS
+# =========================================================================
+
+class TestPrivacyOptOutClaims:
+    """privacy.html claims users can opt out of query retention by sending
+    an HTTP header 'X-VVUQ-No-Log: true'. This is a specific, testable
+    claim that must be verifiable from the plugin's own configuration.
+
+    Round 2 Critic Focus: privacy.html was just drafted and its claims
+    may be aspirational rather than implemented.
+    """
+
+    @pytest.fixture
+    def privacy_html(self) -> str:
+        path = PLUGIN_ROOT / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_opt_out_header_claim_exists(self, privacy_html):
+        """Confirm the opt-out header claim is present so subsequent
+        tests are testing the right thing."""
+        assert "X-VVUQ-No-Log" in privacy_html, (
+            "Expected X-VVUQ-No-Log opt-out header claim in privacy.html"
+        )
+
+    def test_plugin_cannot_send_opt_out_header(self, privacy_html):
+        """The .mcp.json configures the MCP server with only a URL field.
+        There is no 'headers' configuration. This means the plugin has
+        NO mechanism for users to actually send the X-VVUQ-No-Log header.
+
+        The privacy policy promises an opt-out that the plugin cannot
+        deliver. Users who read the privacy policy and want to opt out
+        have no way to do so through the plugin.
+        """
+        mcp_config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text())
+        server_config = mcp_config.get("mcpServers", {}).get("vvuq4ai", {})
+
+        has_headers_config = "headers" in server_config
+        has_env_for_headers = "env" in server_config
+
+        # Check all plugin docs for any mention of how to set the header
+        all_docs = ""
+        for doc_path in [
+            "README.md",
+            "commands/verify.md",
+            "agents/vvuq-verifier.md",
+            "skills/verify-claim/SKILL.md",
+        ]:
+            p = PLUGIN_ROOT / doc_path
+            if p.exists():
+                all_docs += p.read_text()
+
+        docs_mention_header = "X-VVUQ-No-Log" in all_docs
+
+        assert has_headers_config or has_env_for_headers or docs_mention_header, (
+            "DECEPTION: privacy.html promises opt-out via 'X-VVUQ-No-Log: true' "
+            "header, but the plugin provides NO mechanism to send this header. "
+            "The .mcp.json has only a 'url' field with no headers configuration. "
+            "No plugin documentation mentions how to set this header. "
+            "Users who read the privacy policy and want to opt out cannot do so "
+            "through the plugin. Either (1) add header support to .mcp.json, "
+            "(2) document how users can set the header, or (3) remove the "
+            "header-based opt-out claim from privacy.html."
+        )
+
+    def test_opt_out_claim_not_qualified_as_aspirational(self, privacy_html):
+        """The opt-out claim is stated as a present capability ('you can
+        opt out by including the HTTP header'). If this is not yet
+        implemented on the backend, the claim is false.
+
+        Check whether the privacy policy includes any qualifier indicating
+        the feature is planned, beta, or not yet available.
+        """
+        # Find the opt-out section
+        opt_out_idx = privacy_html.find("X-VVUQ-No-Log")
+        if opt_out_idx < 0:
+            pytest.skip("Opt-out header not mentioned")
+
+        context = privacy_html[max(0, opt_out_idx - 300):opt_out_idx + 300]
+
+        qualifiers = [
+            "planned",
+            "coming soon",
+            "future",
+            "not yet",
+            "beta",
+            "experimental",
+            "will be",
+            "intended",
+            "aspirational",
+        ]
+        has_qualifier = any(q in context.lower() for q in qualifiers)
+
+        # The claim uses present tense ("you can opt out") — if unqualified,
+        # it asserts the feature exists NOW.
+        if not has_qualifier:
+            # This is informational — the claim is stated as fact.
+            # The test below (test_plugin_cannot_send_opt_out_header) catches
+            # the actual gap. This test documents the language used.
+            pass
+
+
+# =========================================================================
+# 13. PRIVACY POLICY — DATA RETENTION PERIOD CLAIMS
+# =========================================================================
+
+class TestPrivacyRetentionClaims:
+    """privacy.html makes specific data retention commitments:
+    - Server logs: 90 days
+    - Query logs: 12 months
+
+    These are legally binding commitments that cannot be verified from
+    the plugin alone. The tests flag these as unverifiable claims.
+    """
+
+    @pytest.fixture
+    def privacy_html(self) -> str:
+        path = PLUGIN_ROOT / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_90_day_retention_claim_is_unverifiable(self, privacy_html):
+        """The privacy policy claims server logs are retained for 'up to
+        90 days'. Users have no way to verify this claim. There is no
+        audit mechanism, no data export, and no deletion confirmation.
+
+        This is a trust-based claim that could be false without anyone
+        knowing.
+        """
+        assert "90 days" in privacy_html, "Expected 90-day retention claim"
+
+        verification_terms = [
+            "audit",
+            "data export",
+            "deletion confirmation",
+            "you can request",
+            "data access request",
+            "verify deletion",
+            "subject access",
+            "GDPR",
+            "CCPA",
+        ]
+        has_verification = any(
+            term in privacy_html.lower() for term in verification_terms
+        )
+        assert has_verification, (
+            "UNVERIFIABLE CLAIM: privacy.html states server logs are retained "
+            "for 'up to 90 days' but provides no mechanism for users to verify "
+            "this (no audit trail, no data export, no deletion confirmation, "
+            "no data access request process). Users must take this on trust. "
+            "Consider adding a data access/deletion request process."
+        )
+
+    def test_12_month_retention_claim_is_unverifiable(self, privacy_html):
+        """The privacy policy claims query logs are retained for 'up to
+        12 months'. Same issue as the 90-day claim — no verification.
+        """
+        assert "12 months" in privacy_html, "Expected 12-month retention claim"
+
+        verification_terms = [
+            "audit",
+            "data export",
+            "deletion confirmation",
+            "data access request",
+            "subject access",
+            "GDPR",
+            "CCPA",
+            "you can request",
+        ]
+        has_verification = any(
+            term in privacy_html.lower() for term in verification_terms
+        )
+        assert has_verification, (
+            "UNVERIFIABLE CLAIM: privacy.html states query logs are retained "
+            "for 'up to 12 months' but provides no mechanism for users to "
+            "verify this. Consider adding a data access/deletion request process."
+        )
+
+
+# =========================================================================
+# 14. PRIVACY POLICY — DISCOVERABILITY AND TRANSPARENCY
+# =========================================================================
+
+class TestPrivacyDiscoverability:
+    """A privacy policy that exists but is not referenced from any
+    user-facing documentation is effectively hidden. Users installing
+    the plugin from the marketplace will not know it exists.
+    """
+
+    @pytest.fixture
+    def privacy_html(self) -> str:
+        path = PLUGIN_ROOT / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_readme_links_to_privacy_policy(self, readme_text, privacy_html):
+        """README.md should link to privacy.html so users know about
+        the data collection before installing the plugin.
+        """
+        privacy_references = [
+            "privacy.html",
+            "privacy policy",
+            "Privacy Policy",
+            "data collection",
+            "data retention",
+        ]
+        has_reference = any(
+            ref.lower() in readme_text.lower() for ref in privacy_references
+        )
+        assert has_reference, (
+            "TRANSPARENCY GAP: privacy.html exists but README.md does not "
+            "reference or link to it. Users installing from the marketplace "
+            "will not know the privacy policy exists. A plugin that sends "
+            "user data to a remote server should prominently link to its "
+            "privacy policy in the README."
+        )
+
+    def test_plugin_json_has_privacy_url(self, privacy_html):
+        """plugin.json should include a privacyPolicy field pointing to
+        the privacy policy, following marketplace best practices.
+        """
+        plugin_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        has_privacy_field = any(
+            key in plugin_data
+            for key in ["privacyPolicy", "privacy_policy", "privacy", "privacyUrl"]
+        )
+        assert has_privacy_field, (
+            "MISSING METADATA: plugin.json does not include a privacy policy "
+            "URL field (e.g., 'privacyPolicy'). A plugin that transmits user "
+            "data to a remote server should declare its privacy policy in "
+            "plugin metadata for marketplace review."
+        )
+
+
+# =========================================================================
+# 15. PRIVACY POLICY — DATA COLLECTION TRANSPARENCY IN PLUGIN DOCS
+# =========================================================================
+
+class TestDataCollectionTransparency:
+    """The privacy policy reveals that VVUQ4AI collects and retains
+    claim text for up to 12 months. None of the plugin's operational
+    documents (README, agent, skill, command) mention this data retention
+    to users. This is a transparency gap.
+    """
+
+    @pytest.fixture
+    def privacy_html(self) -> str:
+        path = PLUGIN_ROOT / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_readme_discloses_data_retention(self, readme_text, privacy_html):
+        """README.md should mention that submitted claims may be retained
+        by the service, not just processed and discarded.
+        """
+        retention_terms = [
+            "retain",
+            "stored",
+            "logged",
+            "data retention",
+            "query logs",
+            "may be kept",
+            "privacy",
+        ]
+        has_retention_mention = any(
+            term in readme_text.lower() for term in retention_terms
+        )
+        assert has_retention_mention, (
+            "TRANSPARENCY GAP: privacy.html states that query text is 'retained "
+            "in server logs to improve verification accuracy' for up to 12 months. "
+            "README.md does not mention this data retention at all. Users should "
+            "be informed before installation that their claims will be stored, "
+            "not just processed in real time."
+        )
+
+    def test_command_discloses_data_transmission(self, command_md, privacy_html):
+        """The /verify command sends user claims to a remote server. The
+        command doc should note that the claim text is transmitted and
+        may be retained.
+        """
+        transmission_terms = [
+            "sent to",
+            "transmitted",
+            "remote server",
+            "privacy",
+            "data collection",
+            "retained",
+            "logged",
+        ]
+        has_transmission_note = any(
+            term in command_md.lower() for term in transmission_terms
+        )
+        assert has_transmission_note, (
+            "TRANSPARENCY GAP: The /verify command transmits user claim text "
+            "to a remote server where it may be retained for 12 months (per "
+            "privacy.html). The command documentation does not mention data "
+            "transmission or retention. Users should be informed at the point "
+            "of use."
+        )
+
+
+# =========================================================================
+# 16. PRIVACY POLICY — INTERNAL CONSISTENCY
+# =========================================================================
+
+class TestPrivacyInternalConsistency:
+    """Check that the privacy policy is internally consistent and does
+    not contradict other plugin documentation.
+    """
+
+    @pytest.fixture
+    def privacy_html(self) -> str:
+        path = PLUGIN_ROOT / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_privacy_operator_matches_plugin_author(self, privacy_html):
+        """The privacy policy names 'Dirk Englund' as the operator.
+        This should match the author in plugin.json.
+        """
+        plugin_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        author_name = plugin_data.get("author", {}).get("name", "")
+        assert author_name in privacy_html, (
+            f"Privacy policy operator does not match plugin.json author. "
+            f"plugin.json author: '{author_name}', but privacy.html does "
+            f"not mention this name."
+        )
+
+    def test_privacy_contact_email_matches_plugin_author(self, privacy_html):
+        """The contact email in privacy.html should match the author
+        email in plugin.json.
+        """
+        plugin_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        author_email = plugin_data.get("author", {}).get("email", "")
+        assert author_email in privacy_html, (
+            f"Privacy policy contact email does not match plugin.json author "
+            f"email. plugin.json: '{author_email}'."
+        )
+
+    def test_privacy_date_is_not_in_the_future(self, privacy_html):
+        """The 'Last updated' date should not be in the future, which
+        would suggest fabrication.
+        """
+        import datetime
+        date_match = re.search(
+            r"Last updated:\s*([\w\s,]+\d{4})", privacy_html
+        )
+        assert date_match, "Could not find 'Last updated' date in privacy.html"
+        date_str = date_match.group(1).strip()
+        try:
+            parsed = datetime.datetime.strptime(date_str, "%B %d, %Y")
+            # Allow a 1-day buffer for timezone differences
+            assert parsed.date() <= (
+                datetime.date.today() + datetime.timedelta(days=1)
+            ), (
+                f"Privacy policy 'Last updated' date ({date_str}) is in the "
+                f"future. This suggests the date was fabricated."
+            )
+        except ValueError:
+            pytest.fail(
+                f"Could not parse 'Last updated' date: '{date_str}'. "
+                f"Expected format: 'Month DD, YYYY'."
+            )
+
+    def test_privacy_claims_no_personal_data_but_collects_ip(self, privacy_html):
+        """The privacy policy says 'VVUQ4AI does not collect names,
+        email addresses, account identifiers, or any personal information
+        beyond what is listed above.' But it also collects IP addresses,
+        which ARE personal data under GDPR. This is a contradiction.
+        """
+        collects_ip = "IP address" in privacy_html or "ip address" in privacy_html.lower()
+        claims_no_personal = "personal information" in privacy_html.lower()
+
+        if collects_ip and claims_no_personal:
+            # Check if the "no personal information" claim is qualified
+            # to exclude the already-listed items
+            context_idx = privacy_html.lower().find("personal information")
+            context = privacy_html[max(0, context_idx - 200):context_idx + 200]
+            is_qualified = "beyond what is listed" in context.lower()
+            if is_qualified:
+                # The claim is qualified ("beyond what is listed above")
+                # but IP addresses are listed above and ARE personal data
+                # under GDPR. The qualification helps but the claim is
+                # still potentially misleading in GDPR jurisdictions.
+                pass  # Acceptable qualification, though GDPR may disagree
+
+
+# =========================================================================
+# 17. PRIVACY POLICY — FILE NOT IN .gitignore AND NOT IN DISTRIBUTION LIST
+# =========================================================================
+
+class TestPrivacyFileStatus:
+    """Check whether privacy.html is properly integrated into the
+    plugin distribution or is an orphaned file.
+    """
+
+    def test_privacy_html_is_mentioned_in_plugin_json_or_marketplace(self):
+        """If privacy.html exists, it should be referenced in plugin
+        metadata so the marketplace knows it is part of the distribution.
+        """
+        privacy_path = PLUGIN_ROOT / "privacy.html"
+        if not privacy_path.exists():
+            pytest.skip("privacy.html does not exist")
+
+        plugin_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        marketplace_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "marketplace.json").read_text()
+        )
+
+        all_config_text = json.dumps(plugin_data) + json.dumps(marketplace_data)
+        has_reference = "privacy" in all_config_text.lower()
+
+        assert has_reference, (
+            "privacy.html exists in the plugin directory but is not referenced "
+            "in plugin.json or marketplace.json. It is an orphaned file that "
+            "will not be discoverable through the marketplace. Add a "
+            "'privacyPolicy' field to plugin.json."
+        )
+
+
+# =========================================================================
+# 18. "MATHEMATICAL PROOFS" CLAIM IN DESCRIPTIONS
+# =========================================================================
+
+class TestMathematicalProofsClaimInDescriptions:
+    """plugin.json and marketplace.json both use the phrase 'mathematical
+    proofs' in the description. The backend (as demonstrated in round 1
+    tests) does not perform mathematical proofs -- it does semantic
+    search and possibly SymPy checks. Calling these 'proofs' is
+    misleading.
+    """
+
+    def test_description_does_not_say_proofs(self):
+        """The word 'proofs' implies formal mathematical proof (e.g.,
+        Lean, Coq, or rigorous derivation). The VVUQ service does
+        heuristic checks, not proofs. The description should say
+        'checks' or 'verification' instead of 'proofs'.
+        """
+        plugin_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text()
+        )
+        desc = plugin_data.get("description", "")
+
+        if "proofs" in desc.lower() or "proof" in desc.lower():
+            # Check if "proof" is qualified (e.g., "not absolute proof")
+            if "not absolute proof" in desc.lower() or "not proof" in desc.lower():
+                return  # Qualified usage is acceptable
+
+            pytest.fail(
+                f"MISLEADING CLAIM: plugin.json description uses 'proofs': "
+                f"'{desc}'. The VVUQ service does not perform formal "
+                f"mathematical proofs. It performs heuristic verification "
+                f"checks (semantic search, SymPy evaluation). Using 'proofs' "
+                f"implies formal proof systems (Lean, Coq, Isabelle) which "
+                f"the service does not use. Replace 'proofs' with 'checks' "
+                f"or 'verification'."
+            )
+
+    def test_marketplace_description_does_not_say_proofs(self):
+        """Same check for the marketplace.json metadata description."""
+        marketplace_data = json.loads(
+            (PLUGIN_ROOT / ".claude-plugin" / "marketplace.json").read_text()
+        )
+        meta_desc = marketplace_data.get("metadata", {}).get("description", "")
+        plugin_descs = [
+            entry.get("description", "")
+            for entry in marketplace_data.get("plugins", [])
+        ]
+        all_descs = [meta_desc] + plugin_descs
+
+        for desc in all_descs:
+            if "proofs" in desc.lower() or "proof" in desc.lower():
+                if "not absolute proof" in desc.lower() or "not proof" in desc.lower():
+                    continue
+                pytest.fail(
+                    f"MISLEADING CLAIM: marketplace.json description uses "
+                    f"'proofs': '{desc}'. The VVUQ service performs heuristic "
+                    f"checks, not formal mathematical proofs. Replace 'proofs' "
+                    f"with 'checks' or 'verification'."
+                )

@@ -5,14 +5,14 @@
     "email": "englund@mit.edu"
   },
   "metadata": {
-    "description": "VVUQ4AI — Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical proofs",
+    "description": "VVUQ4AI — Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "vvuq4ai",
       "source": "./",
-      "description": "Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical proofs",
+      "description": "Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks",
       "version": "0.1.0",
       "author": {
         "name": "Dirk Englund",

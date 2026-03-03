@@ -415,3 +415,296 @@ class TestUnnecessaryFiles:
             f"Test files in distribution tree: "
             f"{[str(t.relative_to(PLUGIN_ROOT)) for t in test_files]}"
         )
+
+
+# ===========================================================================
+# Round 2 — Performance critic additions (2026-03-03)
+# ===========================================================================
+
+
+# ===========================================================================
+# 9. privacy.html — server asset in plugin distribution
+# ===========================================================================
+
+class TestPrivacyHtmlDistributionImpact:
+    """privacy.html is a server-side web asset (served by the MCP server).
+    It has no role in the Claude Code plugin runtime. Including it in the
+    plugin repo inflates the distribution for marketplace users."""
+
+    PRIVACY_FILE = PLUGIN_ROOT / "privacy.html"
+
+    def test_privacy_html_is_not_referenced_by_any_plugin_config(self):
+        """privacy.html should be referenced by at least one plugin config
+        file if it belongs in the distribution. If no config references it,
+        it is dead weight.
+
+        Checks: plugin.json, marketplace.json, .mcp.json, README.md,
+        commands/verify.md, agents/vvuq-verifier.md, skills/verify-claim/SKILL.md"""
+        if not self.PRIVACY_FILE.exists():
+            pytest.skip("privacy.html does not exist")
+
+        config_files = [
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+            ".mcp.json",
+            "README.md",
+            "commands/verify.md",
+            "agents/vvuq-verifier.md",
+            "skills/verify-claim/SKILL.md",
+        ]
+        referencing_files = []
+        for rel in config_files:
+            text = _read_text(rel)
+            if "privacy" in text.lower() or "privacy.html" in text:
+                referencing_files.append(rel)
+
+        # This SHOULD fail: privacy.html is not referenced anywhere,
+        # confirming it is an orphaned server asset.
+        assert len(referencing_files) > 0, (
+            "privacy.html is not referenced by any plugin configuration or "
+            "instruction file. It appears to be a server-side web asset that "
+            "should live in the MCP server repo (dirkenglund/vvuq-mcp), not "
+            "in the plugin distribution. Remove it or add it to a distribution "
+            "exclude list to save {size} bytes.".format(
+                size=self.PRIVACY_FILE.stat().st_size if self.PRIVACY_FILE.exists() else "?"
+            )
+        )
+
+    def test_privacy_html_is_largest_distribution_file(self):
+        """Flag if a non-functional file (privacy.html) is the largest file
+        in the distribution. The largest file should be a functional plugin
+        component (agent, command, skill), not a web asset."""
+        if not self.PRIVACY_FILE.exists():
+            pytest.skip("privacy.html does not exist")
+
+        files = _distribution_files()
+        if not files:
+            pytest.skip("No distribution files found")
+
+        largest = max(files, key=lambda p: p.stat().st_size)
+        assert largest.name != "privacy.html", (
+            f"privacy.html ({largest.stat().st_size:,} bytes) is the LARGEST "
+            f"file in the plugin distribution. A server-side web asset should "
+            f"not dominate the distribution size budget. Move it to the MCP "
+            f"server repo or exclude it from distribution."
+        )
+
+    def test_distribution_size_headroom_above_20_percent(self):
+        """After adding privacy.html, verify there is at least 20% headroom
+        below the 20 KB distribution limit. Thin margins mean the next file
+        addition will break the size constraint."""
+        files = _distribution_files()
+        total = sum(p.stat().st_size for p in files)
+        limit = 20_000
+        headroom_pct = (limit - total) / limit * 100
+
+        assert headroom_pct >= 20.0, (
+            f"Distribution is {total:,} bytes — only {headroom_pct:.1f}% "
+            f"headroom below the 20 KB limit. Target >= 20% headroom. "
+            f"Consider removing non-essential files (e.g., privacy.html at "
+            f"{(PLUGIN_ROOT / 'privacy.html').stat().st_size if (PLUGIN_ROOT / 'privacy.html').exists() else '?'} bytes)."
+        )
+
+
+# ===========================================================================
+# 10. Foreign file types — HTML in a JSON+Markdown distribution
+# ===========================================================================
+
+class TestDistributionFileTypes:
+    """A Claude Code plugin distribution should contain only expected file
+    types: JSON configs, Markdown instructions, LICENSE (no extension),
+    and dotfiles (.gitignore, .mcp.json). HTML files are web assets and
+    should not be distributed to plugin users."""
+
+    # File extensions expected in a Claude Code plugin distribution
+    _EXPECTED_EXTENSIONS = {
+        ".json",     # config files
+        ".md",       # instruction files (commands, agents, skills, README)
+        "",          # LICENSE, .gitignore (no extension)
+    }
+
+    # Filenames that are allowed despite not matching extensions above
+    _EXPECTED_NAMES = {
+        "LICENSE",
+        ".gitignore",
+        ".mcp.json",
+    }
+
+    def test_no_html_files_in_distribution(self):
+        """HTML files are web assets, not plugin components. They add to
+        distribution size without contributing to plugin functionality."""
+        html_files = [
+            p for p in _distribution_files()
+            if p.suffix.lower() == ".html"
+        ]
+        assert not html_files, (
+            f"HTML files found in plugin distribution: "
+            f"{[str(h.relative_to(PLUGIN_ROOT)) for h in html_files]}. "
+            f"HTML is a web asset format — move to the server repo or exclude "
+            f"from distribution."
+        )
+
+    def test_only_expected_file_extensions_in_distribution(self):
+        """Distribution should only contain JSON, Markdown, and plain text
+        files. Any other extension suggests a file that does not belong."""
+        unexpected = []
+        for p in _distribution_files():
+            ext = p.suffix.lower()
+            if ext not in self._EXPECTED_EXTENSIONS and p.name not in self._EXPECTED_NAMES:
+                unexpected.append(
+                    f"{p.relative_to(PLUGIN_ROOT)} (extension: {ext or '(none)'})"
+                )
+        assert not unexpected, (
+            f"Files with unexpected extensions in distribution: {unexpected}. "
+            f"A Claude Code plugin should only contain .json, .md, and plain "
+            f"text files."
+        )
+
+
+# ===========================================================================
+# 11. Inline CSS in privacy.html — code hygiene / token waste
+# ===========================================================================
+
+class TestPrivacyHtmlCodeHygiene:
+    """If privacy.html remains in the repo, its inline CSS is a code hygiene
+    issue: it inflates token consumption when Claude reads the file, and it
+    mixes presentation with content."""
+
+    PRIVACY_FILE = PLUGIN_ROOT / "privacy.html"
+
+    def test_no_inline_style_blocks_in_html(self):
+        """HTML files should use external CSS, not inline <style> blocks.
+        Inline CSS adds ~500 bytes of non-functional content to the file,
+        wasting tokens if Claude ever reads it."""
+        if not self.PRIVACY_FILE.exists():
+            pytest.skip("privacy.html does not exist")
+
+        content = self.PRIVACY_FILE.read_text(encoding="utf-8")
+        style_blocks = re.findall(r"<style[\s>].*?</style>", content, re.DOTALL | re.IGNORECASE)
+        assert len(style_blocks) == 0, (
+            f"privacy.html contains {len(style_blocks)} inline <style> block(s) "
+            f"totaling ~{sum(len(b) for b in style_blocks)} characters. "
+            f"Inline CSS inflates token consumption. Either use an external "
+            f"stylesheet or, better, move this file out of the plugin repo."
+        )
+
+    def test_privacy_html_token_cost(self):
+        """privacy.html should not consume more tokens than any instruction
+        file, since it provides zero plugin functionality."""
+        if not self.PRIVACY_FILE.exists():
+            pytest.skip("privacy.html does not exist")
+
+        privacy_tokens = _approx_tokens(self.PRIVACY_FILE.read_text(encoding="utf-8"))
+
+        # Compare against the smallest instruction file
+        instruction_files = [
+            "commands/verify.md",
+            "agents/vvuq-verifier.md",
+            "skills/verify-claim/SKILL.md",
+        ]
+        min_instruction_tokens = min(
+            _approx_tokens(_read_text(f)) for f in instruction_files
+        )
+
+        assert privacy_tokens < min_instruction_tokens, (
+            f"privacy.html consumes ~{privacy_tokens} tokens, which exceeds "
+            f"the smallest instruction file (~{min_instruction_tokens} tokens). "
+            f"A non-functional web asset should not have a larger token "
+            f"footprint than actual plugin instructions."
+        )
+
+
+# ===========================================================================
+# 12. Distribution file count margin
+# ===========================================================================
+
+class TestDistributionFileCountMargin:
+    """The round 1 test checks file count < 15. After adding privacy.html,
+    verify the margin is still healthy."""
+
+    def test_distribution_file_count_has_margin(self):
+        """Distribution file count should leave at least 3 slots of headroom
+        below the 15-file limit, so future additions (e.g., hooks, additional
+        commands) do not immediately break the constraint."""
+        files = _distribution_files()
+        count = len(files)
+        limit = 15
+        headroom = limit - count
+        assert headroom >= 3, (
+            f"Distribution has {count} files — only {headroom} slots "
+            f"remaining below the {limit}-file limit. Target >= 3 slots "
+            f"of headroom. Consider removing non-essential files."
+        )
+
+
+# ===========================================================================
+# 13. Token budget — total including non-instruction files
+# ===========================================================================
+
+class TestTotalTokenBudget:
+    """Round 1 tests only check instruction files (agent, command, skill).
+    This test checks the total token load of ALL distributed text files,
+    since Claude may read any of them when exploring a plugin."""
+
+    def test_total_distribution_tokens_under_3500(self):
+        """If Claude reads all distributed files (e.g., exploring the plugin),
+        the total token cost should stay under 3500 tokens. This is the
+        worst-case full-exploration token load."""
+        files = _distribution_files()
+        total_tokens = 0
+        file_tokens = []
+        for p in files:
+            try:
+                text = p.read_text(encoding="utf-8")
+                tokens = _approx_tokens(text)
+                total_tokens += tokens
+                file_tokens.append((str(p.relative_to(PLUGIN_ROOT)), tokens))
+            except UnicodeDecodeError:
+                continue
+
+        assert total_tokens < 3500, (
+            f"Total distribution token load is ~{total_tokens} tokens "
+            f"(target < 3500). Breakdown: "
+            f"{sorted(file_tokens, key=lambda x: -x[1])}"
+        )
+
+    @pytest.mark.xfail(reason="Small plugin has minimum overhead floor — LICENSE, README, configs are all required")
+    def test_non_instruction_files_under_30_percent_of_token_budget(self):
+        """Non-instruction files (LICENSE, README, configs)
+        should consume less than 30% of the total distribution token budget.
+        Instruction files are the payload; everything else is overhead."""
+        instruction_files = {
+            "agents/vvuq-verifier.md",
+            "commands/verify.md",
+            "skills/verify-claim/SKILL.md",
+        }
+
+        files = _distribution_files()
+        instruction_tokens = 0
+        overhead_tokens = 0
+
+        for p in files:
+            try:
+                text = p.read_text(encoding="utf-8")
+                tokens = _approx_tokens(text)
+            except UnicodeDecodeError:
+                continue
+
+            rel = str(p.relative_to(PLUGIN_ROOT))
+            if rel in instruction_files:
+                instruction_tokens += tokens
+            else:
+                overhead_tokens += tokens
+
+        total = instruction_tokens + overhead_tokens
+        if total == 0:
+            pytest.skip("No distribution files with readable content")
+
+        overhead_pct = overhead_tokens / total * 100
+        assert overhead_pct < 30.0, (
+            f"Non-instruction files consume {overhead_pct:.1f}% of total "
+            f"distribution tokens ({overhead_tokens}/{total}). "
+            f"Target < 30%. Overhead files are adding too much token cost. "
+            f"Consider trimming README, removing privacy.html, or minimizing "
+            f"config files."
+        )

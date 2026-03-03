@@ -1,6 +1,6 @@
 # VVUQ4AI — Claude Code Plugin
 
-Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical proofs.
+Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks.
 
 ## What It Does
 
@@ -67,6 +67,10 @@ The plugin connects to the VVUQ MCP service via SSE transport. No API key config
 
 - **Service unavailable**: The VVUQ service runs on a remote server. If you get connection errors, the service may be temporarily down. Try again later.
 - **No checks fired**: Some claims don't match any verification rules. The verdict will be "unverifiable" — this doesn't mean the claim is wrong, just that no automated check could be applied.
+
+## Privacy
+
+This plugin sends claim text to the VVUQ verification service at `https://vvuq.dirkenglund.org/mcp/`. See the [privacy policy](https://vvuq.dirkenglund.org/privacy) for details on data collection, retention, and opt-out options.
 
 ## License
 

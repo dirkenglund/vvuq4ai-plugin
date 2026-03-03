@@ -863,3 +863,529 @@ class TestSecurity:
             assert not matches, (
                 f"Hardcoded password in {f.relative_to(plugin_root)}"
             )
+
+
+# ===========================================================================
+# 12. PRIVACY POLICY — HTML VALIDITY & QUALITY (Round 2 Critic)
+# ===========================================================================
+
+
+class TestPrivacyHtmlExists:
+    """privacy.html must exist and be a non-empty file."""
+
+    @pytest.mark.xfail(reason="privacy.html lives in vvuq-mcp server repo, not plugin distribution (issue #197)")
+    def test_privacy_html_exists(self, plugin_root):
+        path = plugin_root / "privacy.html"
+        assert path.exists(), "privacy.html not found in plugin root"
+
+    def test_privacy_html_not_empty(self, plugin_root):
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        content = path.read_text()
+        assert len(content) > 100, (
+            f"privacy.html appears empty or truncated ({len(content)} chars)"
+        )
+
+
+class TestPrivacyHtmlValidity:
+    """privacy.html must be valid, well-formed HTML5."""
+
+    @pytest.fixture(scope="class")
+    def privacy_html(self, plugin_root) -> str:
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_has_doctype(self, privacy_html):
+        """HTML5 pages must start with <!DOCTYPE html>."""
+        assert privacy_html.strip().lower().startswith("<!doctype html>"), (
+            "privacy.html must start with <!DOCTYPE html>"
+        )
+
+    def test_has_html_lang_attribute(self, privacy_html):
+        """The <html> tag must have a lang attribute for accessibility."""
+        assert re.search(r'<html[^>]+lang\s*=\s*["\']', privacy_html), (
+            "privacy.html <html> tag missing lang attribute (accessibility requirement)"
+        )
+
+    def test_has_charset_meta(self, privacy_html):
+        """Must declare character encoding via <meta charset>."""
+        assert re.search(r'<meta\s+charset\s*=\s*["\']utf-8["\']', privacy_html, re.IGNORECASE), (
+            "privacy.html missing <meta charset='utf-8'>"
+        )
+
+    def test_has_viewport_meta(self, privacy_html):
+        """Must have viewport meta tag for responsive design."""
+        assert re.search(r'<meta\s+name\s*=\s*["\']viewport["\']', privacy_html, re.IGNORECASE), (
+            "privacy.html missing viewport meta tag (required for mobile responsiveness)"
+        )
+
+    def test_has_title(self, privacy_html):
+        """Must have a <title> element."""
+        assert re.search(r'<title>.+</title>', privacy_html, re.DOTALL), (
+            "privacy.html missing <title> element"
+        )
+
+    def test_title_mentions_privacy(self, privacy_html):
+        """The page title should indicate this is a privacy policy."""
+        title_match = re.search(r'<title>(.+?)</title>', privacy_html, re.DOTALL)
+        assert title_match, "privacy.html missing <title>"
+        title = title_match.group(1).lower()
+        assert "privacy" in title, (
+            f"privacy.html title '{title_match.group(1)}' does not mention 'privacy'"
+        )
+
+    def test_has_body_tags(self, privacy_html):
+        """Must have proper <body> structure."""
+        assert "<body>" in privacy_html.lower(), "privacy.html missing <body> tag"
+        assert "</body>" in privacy_html.lower(), "privacy.html missing </body> tag"
+
+    def test_has_head_tags(self, privacy_html):
+        """Must have proper <head> structure."""
+        assert "<head>" in privacy_html.lower(), "privacy.html missing <head> tag"
+        assert "</head>" in privacy_html.lower(), "privacy.html missing </head> tag"
+
+    def test_html_tags_properly_closed(self, privacy_html):
+        """Check that major structural tags are properly closed."""
+        for tag in ["html", "head", "body"]:
+            open_count = len(re.findall(rf'<{tag}[\s>]', privacy_html, re.IGNORECASE))
+            close_count = len(re.findall(rf'</{tag}>', privacy_html, re.IGNORECASE))
+            assert open_count == close_count, (
+                f"privacy.html: <{tag}> appears {open_count} times but "
+                f"</{tag}> appears {close_count} times"
+            )
+
+    def test_no_unclosed_heading_tags(self, privacy_html):
+        """All heading tags (h1-h6) must be properly closed."""
+        for level in range(1, 7):
+            open_count = len(re.findall(rf'<h{level}[\s>]', privacy_html, re.IGNORECASE))
+            close_count = len(re.findall(rf'</h{level}>', privacy_html, re.IGNORECASE))
+            assert open_count == close_count, (
+                f"privacy.html: <h{level}> count ({open_count}) != "
+                f"</h{level}> count ({close_count})"
+            )
+
+    def test_no_unclosed_paragraph_tags(self, privacy_html):
+        """<p> tags should have matching </p> tags."""
+        open_count = len(re.findall(r'<p[\s>]', privacy_html, re.IGNORECASE))
+        close_count = len(re.findall(r'</p>', privacy_html, re.IGNORECASE))
+        assert open_count == close_count, (
+            f"privacy.html: <p> count ({open_count}) != </p> count ({close_count})"
+        )
+
+    def test_no_unclosed_list_tags(self, privacy_html):
+        """<ul> and <li> tags should be properly matched."""
+        for tag in ["ul", "li"]:
+            open_count = len(re.findall(rf'<{tag}[\s>]', privacy_html, re.IGNORECASE))
+            close_count = len(re.findall(rf'</{tag}>', privacy_html, re.IGNORECASE))
+            assert open_count == close_count, (
+                f"privacy.html: <{tag}> count ({open_count}) != "
+                f"</{tag}> count ({close_count})"
+            )
+
+    def test_links_have_href(self, privacy_html):
+        """All <a> tags must have an href attribute."""
+        a_tags = re.findall(r'<a\s+[^>]*>', privacy_html, re.IGNORECASE)
+        for tag in a_tags:
+            assert 'href=' in tag.lower(), (
+                f"privacy.html: <a> tag without href: {tag}"
+            )
+
+    def test_mailto_links_valid(self, privacy_html):
+        """mailto: links must have valid email addresses."""
+        mailto_links = re.findall(r'href\s*=\s*["\']mailto:([^"\']+)["\']', privacy_html)
+        email_re = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+        for email in mailto_links:
+            assert email_re.match(email), (
+                f"privacy.html: invalid email in mailto link: {email}"
+            )
+
+
+class TestPrivacyHtmlAccessibility:
+    """privacy.html must meet basic accessibility standards."""
+
+    @pytest.fixture(scope="class")
+    def privacy_html(self, plugin_root) -> str:
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_has_h1_heading(self, privacy_html):
+        """Page must have exactly one <h1> for screen reader navigation."""
+        h1_count = len(re.findall(r'<h1[\s>]', privacy_html, re.IGNORECASE))
+        assert h1_count == 1, (
+            f"privacy.html should have exactly 1 <h1>, found {h1_count}"
+        )
+
+    def test_heading_hierarchy_not_skipped(self, privacy_html):
+        """Heading levels should not skip (e.g., h1 then h3 without h2)."""
+        headings = re.findall(r'<h(\d)', privacy_html, re.IGNORECASE)
+        levels = [int(h) for h in headings]
+        for i in range(1, len(levels)):
+            jump = levels[i] - levels[i - 1]
+            assert jump <= 1, (
+                f"privacy.html: heading hierarchy skips from h{levels[i-1]} "
+                f"to h{levels[i]} (should not skip levels)"
+            )
+
+    def test_sufficient_color_contrast_declaration(self, privacy_html):
+        """Body text color should be dark enough for readability.
+        A color like #222 on white background has sufficient contrast."""
+        color_match = re.search(r'color:\s*#([0-9a-fA-F]{3,6})', privacy_html)
+        if color_match:
+            hex_color = color_match.group(1)
+            if len(hex_color) == 3:
+                hex_color = ''.join(c * 2 for c in hex_color)
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            # Luminance should be dark (low values) for readable text on white
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            assert luminance < 128, (
+                f"privacy.html body text color #{hex_color} may not have "
+                f"sufficient contrast against white background (luminance={luminance:.0f})"
+            )
+
+    def test_responsive_max_width(self, privacy_html):
+        """Page should have a max-width constraint for readability on wide screens."""
+        assert re.search(r'max-width:\s*\d+', privacy_html), (
+            "privacy.html should set max-width on the body/container for readability"
+        )
+
+    def test_readable_line_height(self, privacy_html):
+        """Line height should be at least 1.4 for readability."""
+        lh_match = re.search(r'line-height:\s*([\d.]+)', privacy_html)
+        if lh_match:
+            lh = float(lh_match.group(1))
+            assert lh >= 1.4, (
+                f"privacy.html line-height is {lh}, should be >= 1.4 for readability"
+            )
+
+
+class TestPrivacyHtmlContent:
+    """privacy.html must cover essential privacy policy sections."""
+
+    @pytest.fixture(scope="class")
+    def privacy_text(self, plugin_root) -> str:
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        # Strip HTML tags for text-only content analysis
+        raw = path.read_text()
+        return re.sub(r'<[^>]+>', ' ', raw)
+
+    @pytest.fixture(scope="class")
+    def privacy_html(self, plugin_root) -> str:
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    REQUIRED_SECTIONS = [
+        "what data is collected",
+        "how data is used",
+        "data retention",
+        "contact",
+    ]
+
+    @pytest.mark.parametrize("section", REQUIRED_SECTIONS)
+    def test_has_required_section(self, privacy_text, section):
+        """Privacy policy must cover essential topics."""
+        assert section in privacy_text.lower(), (
+            f"privacy.html missing required section: '{section}'"
+        )
+
+    def test_mentions_data_security(self, privacy_text):
+        """Privacy policy should mention data security measures."""
+        assert "security" in privacy_text.lower() or "encryption" in privacy_text.lower(), (
+            "privacy.html should mention data security measures"
+        )
+
+    def test_mentions_https(self, privacy_text):
+        """Should mention that connections use HTTPS."""
+        assert "https" in privacy_text.lower() or "tls" in privacy_text.lower(), (
+            "privacy.html should mention HTTPS/TLS for data in transit"
+        )
+
+    def test_mentions_no_third_party_sharing(self, privacy_text):
+        """Should clarify whether data is shared with third parties."""
+        assert "third part" in privacy_text.lower(), (
+            "privacy.html should address third-party data sharing"
+        )
+
+    def test_has_last_updated_date(self, privacy_text):
+        """Privacy policy must show when it was last updated."""
+        assert re.search(r'(last\s+updated|effective\s+date)', privacy_text, re.IGNORECASE), (
+            "privacy.html missing a 'Last updated' or 'Effective date' indicator"
+        )
+
+    def test_last_updated_date_is_recent(self, privacy_html):
+        """The 'Last updated' date should be from 2026 (current year)."""
+        date_match = re.search(r'last\s+updated:?\s*(\w+\s+\d+,?\s+\d{4})', privacy_html, re.IGNORECASE)
+        if date_match:
+            date_str = date_match.group(1)
+            assert "2026" in date_str, (
+                f"privacy.html 'Last updated' date '{date_str}' is not from 2026"
+            )
+
+    def test_mentions_opt_out(self, privacy_text):
+        """Users should be informed about opt-out options."""
+        assert "opt" in privacy_text.lower(), (
+            "privacy.html should mention opt-out options for data collection"
+        )
+
+    def test_retention_period_specified(self, privacy_text):
+        """Data retention periods should be explicitly stated."""
+        has_retention_period = re.search(
+            r'\d+\s*(days?|months?|years?)', privacy_text, re.IGNORECASE
+        )
+        assert has_retention_period, (
+            "privacy.html should specify concrete data retention periods "
+            "(e.g., '90 days', '12 months')"
+        )
+
+    def test_no_legal_jargon_without_plain_language(self, privacy_text):
+        """Privacy policy should be in clear, plain language.
+        Check for legalese that might confuse users."""
+        legalese_terms = [
+            "hereinafter",
+            "notwithstanding",
+            "indemnify",
+            "whereas",
+            "heretofore",
+            "aforesaid",
+            "inter alia",
+            "mutatis mutandis",
+        ]
+        found = [t for t in legalese_terms if t in privacy_text.lower()]
+        assert not found, (
+            f"privacy.html contains legal jargon that may confuse users: {found}. "
+            "Use plain language instead."
+        )
+
+    def test_no_spelling_errors_in_privacy(self, privacy_text):
+        """Check for common misspellings in the privacy policy text."""
+        misspellings = {
+            r"\bprivicy\b": "privacy",
+            r"\bcollect\b(?:ed|s|ing)?\b": None,  # skip, just checking bad ones
+            r"\bprivicy\b": "privacy",
+            r"\brecieve\b": "receive",
+            r"\binformaiton\b": "information",
+            r"\bpurpse\b": "purpose",
+            r"\bprocesssing\b": "processing",
+            r"\bsercurity\b": "security",
+            r"\bretetnion\b": "retention",
+            r"\bpersoanl\b": "personal",
+        }
+        for pattern, correction in misspellings.items():
+            if correction is None:
+                continue
+            matches = re.findall(pattern, privacy_text, re.IGNORECASE)
+            assert not matches, (
+                f"privacy.html possible misspelling: found '{matches[0]}', "
+                f"did you mean '{correction}'?"
+            )
+
+
+# ===========================================================================
+# 13. PRIVACY POLICY CROSS-REFERENCES (Round 2 Critic)
+# ===========================================================================
+
+
+class TestPrivacyCrossReferences:
+    """Check that privacy.html is properly referenced from other files."""
+
+    def test_readme_mentions_privacy(self, readme_text):
+        """README should mention the privacy policy for user awareness.
+        A publicly distributed plugin that collects data (claim text,
+        IP addresses) should reference its privacy policy."""
+        has_privacy_ref = any(
+            term in readme_text.lower()
+            for term in ["privacy", "privacy.html", "privacy policy"]
+        )
+        assert has_privacy_ref, (
+            "README.md does not mention a privacy policy. A plugin that sends "
+            "user claim text to a remote server should reference its privacy "
+            "policy so users know what data is collected."
+        )
+
+    def test_privacy_contact_email_matches_author(self, plugin_root):
+        """The contact email in privacy.html must match the plugin author email."""
+        privacy_path = plugin_root / "privacy.html"
+        plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+        if not privacy_path.exists():
+            pytest.skip("privacy.html does not exist")
+
+        privacy_text = privacy_path.read_text()
+        plugin_data = json.loads(plugin_json_path.read_text())
+
+        author_email = plugin_data.get("author", {}).get("email", "")
+        assert author_email, "plugin.json author.email is empty"
+
+        # Extract emails from privacy.html
+        privacy_emails = re.findall(
+            r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+',
+            privacy_text
+        )
+        assert author_email in privacy_emails, (
+            f"privacy.html contact email(s) {privacy_emails} do not include "
+            f"the plugin author email '{author_email}'. These should be consistent."
+        )
+
+    def test_privacy_contact_email_matches_marketplace(self, plugin_root):
+        """The contact email in privacy.html must match marketplace owner email."""
+        privacy_path = plugin_root / "privacy.html"
+        marketplace_path = plugin_root / ".claude-plugin" / "marketplace.json"
+        if not privacy_path.exists():
+            pytest.skip("privacy.html does not exist")
+
+        privacy_text = privacy_path.read_text()
+        marketplace_data = json.loads(marketplace_path.read_text())
+
+        owner_email = marketplace_data.get("owner", {}).get("email", "")
+        assert owner_email, "marketplace.json owner.email is empty"
+
+        privacy_emails = re.findall(
+            r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+',
+            privacy_text
+        )
+        assert owner_email in privacy_emails, (
+            f"privacy.html contact email(s) {privacy_emails} do not include "
+            f"the marketplace owner email '{owner_email}'."
+        )
+
+    def test_privacy_mentions_plugin_name(self, plugin_root):
+        """privacy.html should reference the plugin/service name for clarity."""
+        privacy_path = plugin_root / "privacy.html"
+        if not privacy_path.exists():
+            pytest.skip("privacy.html does not exist")
+
+        privacy_text = privacy_path.read_text()
+        assert "VVUQ4AI" in privacy_text or "vvuq4ai" in privacy_text.lower(), (
+            "privacy.html does not mention the plugin name 'VVUQ4AI'"
+        )
+
+    def test_privacy_mentions_plugin_operator(self, plugin_root):
+        """privacy.html should identify who operates the service."""
+        privacy_path = plugin_root / "privacy.html"
+        plugin_json_path = plugin_root / ".claude-plugin" / "plugin.json"
+        if not privacy_path.exists():
+            pytest.skip("privacy.html does not exist")
+
+        privacy_text = privacy_path.read_text()
+        plugin_data = json.loads(plugin_json_path.read_text())
+        author_name = plugin_data.get("author", {}).get("name", "")
+
+        assert author_name.lower() in privacy_text.lower(), (
+            f"privacy.html does not identify the operator/author '{author_name}'. "
+            "Users should know who operates the service."
+        )
+
+
+# ===========================================================================
+# 14. PLUGIN JSON PRIVACY URL FIELD (Round 2 Critic)
+# ===========================================================================
+
+
+class TestPluginJsonPrivacyUrl:
+    """plugin.json and marketplace.json should reference a privacy policy URL
+    if the plugin sends user data to a remote server."""
+
+    def test_plugin_json_has_privacy_url(self, plugin_json):
+        """plugin.json should include a privacyPolicy or privacy field
+        pointing to the hosted privacy policy."""
+        has_privacy = any(
+            key in plugin_json
+            for key in ["privacyPolicy", "privacy", "privacyUrl", "privacy_url"]
+        )
+        if not has_privacy:
+            pytest.xfail(
+                "plugin.json does not include a privacy policy URL field. "
+                "For a plugin that sends data to a remote server, consider adding "
+                "a 'privacyPolicy' field pointing to the hosted privacy.html."
+            )
+
+    def test_marketplace_json_has_privacy_url(self, marketplace_json):
+        """marketplace.json plugin entries should include a privacy URL."""
+        for entry in marketplace_json.get("plugins", []):
+            has_privacy = any(
+                key in entry
+                for key in ["privacyPolicy", "privacy", "privacyUrl", "privacy_url"]
+            )
+            if not has_privacy:
+                pytest.xfail(
+                    f"marketplace.json plugin entry '{entry.get('name', '?')}' "
+                    "does not include a privacy policy URL. Consider adding one."
+                )
+
+
+# ===========================================================================
+# 15. PRIVACY HTML STYLE & RESPONSIVENESS (Round 2 Critic)
+# ===========================================================================
+
+
+class TestPrivacyHtmlStyle:
+    """privacy.html should be well-styled and responsive."""
+
+    @pytest.fixture(scope="class")
+    def privacy_html(self, plugin_root) -> str:
+        path = plugin_root / "privacy.html"
+        if not path.exists():
+            pytest.skip("privacy.html does not exist")
+        return path.read_text()
+
+    def test_has_internal_or_linked_styles(self, privacy_html):
+        """Page should have CSS (inline <style> or linked stylesheet)."""
+        has_style = "<style>" in privacy_html.lower() or '<link' in privacy_html.lower()
+        assert has_style, (
+            "privacy.html has no CSS styling. A plain unstyled page looks unprofessional."
+        )
+
+    def test_uses_system_font_stack(self, privacy_html):
+        """Should use a system font stack for cross-platform readability."""
+        has_system_fonts = any(
+            font in privacy_html.lower()
+            for font in ["system-ui", "-apple-system", "segoe ui", "sans-serif"]
+        )
+        assert has_system_fonts, (
+            "privacy.html should use a system font stack (e.g., -apple-system, "
+            "Segoe UI, sans-serif) for cross-platform readability"
+        )
+
+    def test_link_color_is_accessible(self, privacy_html):
+        """Link color should have sufficient contrast."""
+        link_color_match = re.search(r'a\s*\{[^}]*color:\s*#([0-9a-fA-F]{3,6})', privacy_html)
+        if link_color_match:
+            hex_color = link_color_match.group(1)
+            if len(hex_color) == 3:
+                hex_color = ''.join(c * 2 for c in hex_color)
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            # Links should be distinguishable but not too light
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            assert luminance < 180, (
+                f"privacy.html link color #{hex_color} may be too light "
+                f"for sufficient contrast (luminance={luminance:.0f})"
+            )
+
+    def test_no_fixed_width_in_pixels_on_body(self, privacy_html):
+        """Body should use max-width (not width) and rem/px units that are reasonable."""
+        # Check for fixed width: NNNpx without max- prefix
+        body_style = re.search(r'body\s*\{([^}]+)\}', privacy_html, re.IGNORECASE)
+        if body_style:
+            style = body_style.group(1)
+            # Should not have width: NNpx (fixed) — max-width is OK
+            has_fixed_width = re.search(r'(?<!max-)width:\s*\d+px', style)
+            assert not has_fixed_width, (
+                "privacy.html body has a fixed pixel width instead of max-width. "
+                "This breaks on narrow screens."
+            )
+
+    def test_padding_for_mobile(self, privacy_html):
+        """Body should have padding so text does not touch screen edges on mobile."""
+        body_style = re.search(r'body\s*\{([^}]+)\}', privacy_html, re.IGNORECASE)
+        if body_style:
+            style = body_style.group(1)
+            assert "padding" in style, (
+                "privacy.html body has no padding. Text will touch screen edges on mobile."
+            )
