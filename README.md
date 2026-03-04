@@ -1,7 +1,6 @@
 # VVUQ4AI — Claude Code Plugin
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://github.com/dirkenglund/vvuq4ai-plugin/actions/workflows/tests.yml/badge.svg)](https://github.com/dirkenglund/vvuq4ai-plugin/actions/workflows/tests.yml)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](.claude-plugin/plugin.json)
 
 Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks.
