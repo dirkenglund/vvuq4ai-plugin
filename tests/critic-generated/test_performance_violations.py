@@ -520,6 +520,7 @@ class TestDistributionFileTypes:
     _EXPECTED_EXTENSIONS = {
         ".json",     # config files
         ".md",       # instruction files (commands, agents, skills, README)
+        ".toml",     # pyproject.toml (pytest config)
         "",          # LICENSE, .gitignore (no extension)
     }
 
@@ -707,4 +708,294 @@ class TestTotalTokenBudget:
             f"Target < 30%. Overhead files are adding too much token cost. "
             f"Consider trimming README, removing privacy.html, or minimizing "
             f"config files."
+        )
+
+
+# ===========================================================================
+# Round 3 — Performance critic additions (2026-03-03)
+# README expansion + CI workflow introduced in this round.
+# ===========================================================================
+
+
+# ===========================================================================
+# 14. README token cost — expanded README now largest distributed file
+# ===========================================================================
+
+class TestReadmeTokenCost:
+    """After round 3 (badges, domain table, How It Works, Access section),
+    README.md has grown to ~655 tokens — larger than every instruction file.
+    A README is documentation for humans on GitHub; it is not a plugin
+    instruction file and does not provide runtime value. Its token cost
+    represents pure overhead whenever Claude explores the distribution."""
+
+    _README = "README.md"
+
+    @pytest.mark.xfail(reason="User requested badges, domain table, How It Works — README content is intentional")
+    def test_readme_smaller_than_each_instruction_file(self):
+        """README is documentation, not runtime instructions. Its token
+        footprint should be smaller than any individual instruction file
+        (agent, command, skill), all of which fire on every invocation.
+
+        After round 3 the README at ~655 tokens exceeds every instruction
+        file (~547-566 tokens each). This is inverted priority."""
+        readme_tokens = _approx_tokens(_read_text(self._README))
+        instruction_files = [
+            "agents/vvuq-verifier.md",
+            "commands/verify.md",
+            "skills/verify-claim/SKILL.md",
+        ]
+        larger_than = [
+            f for f in instruction_files
+            if readme_tokens > _approx_tokens(_read_text(f))
+        ]
+        assert not larger_than, (
+            f"README (~{readme_tokens} tokens) is LARGER than: {larger_than}. "
+            f"Documentation should not outweigh runtime instructions. "
+            f"Trim README to under {min(_approx_tokens(_read_text(f)) for f in instruction_files)} tokens."
+        )
+
+    @pytest.mark.xfail(reason="User requested badges, domain table, How It Works — README content is intentional")
+    def test_readme_under_500_tokens(self):
+        """README grew from minimal (~200 tokens) to ~655 tokens in round 3 —
+        a 3x increase. Each new section (How It Works, domain table, Access,
+        badges) adds token overhead to every GitHub render AND any Claude
+        context load. Cap at 500 tokens (still leaves room for all sections
+        but at tighter wording)."""
+        tokens = _approx_tokens(_read_text(self._README))
+        assert tokens < 500, (
+            f"README is ~{tokens} tokens — target < 500. "
+            f"Round 3 additions (domain table, How It Works, Access, badges) "
+            f"added ~{tokens - 200} tokens over the minimal baseline. "
+            f"Trim prose in 'How It Works', compress the domain table, or "
+            f"move the Access section to commands/verify.md."
+        )
+
+    @pytest.mark.xfail(reason="Each file must be self-contained for independent use — README, agent, command, skill all need verdicts")
+    def test_readme_verdicts_table_not_duplicated(self):
+        """The Verdicts table appears in README.md AND in commands/verify.md
+        AND in skills/verify-claim/SKILL.md. README round 3 added a fourth
+        copy. Every copy beyond the first is pure token waste — users reading
+        the README do not also need it loaded into Claude's context at runtime.
+        The canonical copy should live in one instruction file only."""
+        import re as _re
+        verdict_pattern = _re.compile(
+            r"verified.*flagged.*uncertain.*unverifiable",
+            _re.DOTALL | _re.IGNORECASE,
+        )
+        all_files = [
+            self._README,
+            "agents/vvuq-verifier.md",
+            "commands/verify.md",
+            "skills/verify-claim/SKILL.md",
+        ]
+        hits = [f for f in all_files if verdict_pattern.search(_read_text(f))]
+        assert len(hits) <= 2, (
+            f"Verdicts table found in {len(hits)} files: {hits}. "
+            f"Keep one canonical copy in a runtime instruction file and remove "
+            f"from README (documentation readers don't need it at runtime). "
+            f"Each extra copy wastes ~50 tokens on every plugin invocation."
+        )
+
+
+# ===========================================================================
+# 15. Hardcoded version badge — silent drift on version bump
+# ===========================================================================
+
+class TestReadmeBadgeVersionDrift:
+    """The version badge in README.md hardcodes the version string
+    (e.g. 'version-0.1.0-blue.svg') rather than deriving it from
+    plugin.json. When the version is bumped in plugin.json, the badge
+    silently shows the stale version until manually updated. This is
+    a maintenance-overhead anti-pattern and a consistency performance
+    issue (stale metadata misleads marketplace users).
+
+    This is a design/maintenance issue, not a blocking correctness bug,
+    so the test is marked xfail as an advisory."""
+
+    @pytest.mark.xfail(reason=(
+        "shields.io static badges require hardcoded values by design — "
+        "dynamic endpoint would require a server. Flagged as advisory: "
+        "use a pre-commit hook or CI step to keep badge in sync."
+    ))
+    def test_readme_version_badge_not_hardcoded(self):
+        """The version badge URL should NOT hardcode a version number.
+        It should either use a dynamic shields.io endpoint (reading from
+        the repo) or be generated by CI. A static badge will silently
+        drift on every version bump."""
+        import re as _re
+        readme = _read_text("README.md")
+        hardcoded = _re.findall(
+            r"img\.shields\.io/badge/version-\d+\.\d+\.\d+-", readme
+        )
+        assert not hardcoded, (
+            f"README contains {len(hardcoded)} hardcoded version badge(s): "
+            f"{hardcoded}. These will silently show stale version after a "
+            f"version bump. Use a dynamic endpoint or a CI-sync step."
+        )
+
+    def test_readme_badge_version_matches_plugin_json(self):
+        """While the badge is hardcoded (xfailed above), at minimum the
+        hardcoded version MUST match plugin.json version. If they diverge,
+        marketplace users see incorrect version information."""
+        import re as _re
+        readme = _read_text("README.md")
+        plugin = json.loads(_read_text(".claude-plugin/plugin.json"))
+        plugin_version = plugin.get("version", "")
+
+        badge_versions = _re.findall(
+            r"img\.shields\.io/badge/version-(\d+\.\d+\.\d+)-", readme
+        )
+        for badge_ver in badge_versions:
+            assert badge_ver == plugin_version, (
+                f"README version badge shows '{badge_ver}' but plugin.json "
+                f"says '{plugin_version}'. Update the badge to match. "
+                f"Consider adding a CI step to enforce this automatically."
+            )
+
+
+# ===========================================================================
+# 16. CI workflow efficiency — missing pip cache inflates run time
+# ===========================================================================
+
+class TestCiWorkflowEfficiency:
+    """The .github/workflows/tests.yml added in round 3 runs 'pip install
+    pytest' without caching. On every push to main and every PR, GitHub
+    Actions downloads and installs pytest from scratch. With pip caching,
+    the install step drops from ~15s to <1s for cache hits."""
+
+    _WORKFLOW = pathlib.Path(__file__).parent.parent.parent / ".github" / "workflows" / "tests.yml"
+
+    def _workflow_text(self) -> str:
+        if not self._WORKFLOW.exists():
+            pytest.skip("CI workflow file not found")
+        return self._WORKFLOW.read_text(encoding="utf-8")
+
+    def test_ci_pip_install_is_version_pinned(self):
+        """'pip install pytest' without a version pin means CI silently picks
+        up breaking pytest releases. Pin to a known-good version (e.g.
+        'pytest==8.3.5') or use a requirements-test.txt with pinned deps.
+        Unpinned deps are a reproducibility and stability anti-pattern."""
+        import re as _re
+        text = self._workflow_text()
+        pip_cmds = _re.findall(r"pip install (.+)", text)
+        assert pip_cmds, "No pip install command found in CI workflow."
+        for cmd in pip_cmds:
+            packages = cmd.strip().split()
+            for pkg in packages:
+                # Accept pinned (==), minimum-pinned (>=), or -r requirements
+                is_pinned = ("==" in pkg or ">=" in pkg or pkg.startswith("-r"))
+                assert is_pinned, (
+                    f"CI installs '{pkg}' without version pin. "
+                    f"Use 'pytest==<version>' or a requirements-test.txt to "
+                    f"ensure reproducible CI runs. Unpinned installs silently "
+                    f"pick up breaking changes on new releases."
+                )
+
+    def test_ci_uses_pip_cache(self):
+        """The CI workflow does not configure pip caching. Without caching,
+        every run re-downloads packages from PyPI. For a test suite that
+        runs on every push and PR, this adds 10-20s of unnecessary network
+        I/O per run. Use setup-python's built-in cache key."""
+        text = self._workflow_text()
+        # setup-python supports: with: cache: 'pip'
+        has_cache = "cache: 'pip'" in text or 'cache: "pip"' in text or "cache: pip" in text
+        assert has_cache, (
+            "CI workflow does not configure pip caching. Add:\n"
+            "      - uses: actions/setup-python@v5\n"
+            "        with:\n"
+            "          python-version: '3.12'\n"
+            "          cache: 'pip'\n"
+            "This reduces install time from ~15s to <1s on cache hits."
+        )
+
+    def test_ci_pytest_has_timeout(self):
+        """The CI workflow runs 'pytest tests/critic-generated/ -v --tb=short'
+        with no timeout flag. Per global TDD guidelines (incident 2026-02-07),
+        runaway pytest processes consumed 500 GB+ memory. CI runs in a shared
+        GitHub Actions runner — a runaway test will exhaust the runner and
+        block all subsequent jobs. Add '--timeout=30' or configure
+        'timeout = 30' in pyproject.toml."""
+        import re as _re
+        text = self._workflow_text()
+        pytest_cmds = _re.findall(r"pytest (.+)", text)
+        assert pytest_cmds, "No pytest command found in CI workflow."
+        for cmd in pytest_cmds:
+            has_timeout = "--timeout" in cmd or "timeout" in cmd.lower()
+            assert has_timeout, (
+                f"pytest command '{cmd.strip()}' has no timeout. "
+                f"Add '--timeout=30' to prevent runaway tests from "
+                f"exhausting the GitHub Actions runner. "
+                f"Reference: incident 2026-02-07 (500 GB+ memory consumption)."
+            )
+
+    @pytest.mark.xfail(reason=(
+        "Tag-pinned actions (@v4, @v5) are the de facto community standard "
+        "for small plugins. SHA pinning adds maintenance burden. Flagged as "
+        "advisory: acceptable risk for this project size."
+    ))
+    def test_ci_actions_are_sha_pinned_or_noted(self):
+        """Actions pinned to mutable tags (e.g. @v4, @v5) can silently
+        change behavior when the tag is force-pushed by the action author.
+        SHA pinning (@<40-char-hex>) guarantees reproducibility. This is
+        an advisory for a public plugin — tag pinning is acceptable but
+        SHA pinning is the security-conscious default."""
+        import re as _re
+        text = self._workflow_text()
+        actions = _re.findall(r"uses: ([^\n]+)", text)
+        tag_pinned = []
+        sha_pinned = []
+        for a in actions:
+            a = a.strip()
+            ref = a.split("@", 1)[-1] if "@" in a else ""
+            if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()):
+                sha_pinned.append(a)
+            elif ref.startswith("v"):
+                tag_pinned.append(a)
+        assert not tag_pinned, (
+            f"CI uses tag-pinned actions: {tag_pinned}. "
+            f"Tag pins are mutable — the action author can silently change "
+            f"what @v4/@v5 points to. Pin to a full SHA for reproducibility. "
+            f"Example: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+        )
+
+
+# ===========================================================================
+# 17. README external badge dependencies — shields.io availability coupling
+# ===========================================================================
+
+class TestReadmeBadgeOverhead:
+    """README.md now has 3 badge images (License, Tests, Version). Each badge
+    is an external HTTP request to shields.io or GitHub CI on every page
+    render. This adds latency, creates an availability dependency on
+    shields.io, and bloats the token count of the README when Claude reads
+    it (badge markdown lines add parsing overhead)."""
+
+    def test_readme_badge_count_reasonable(self):
+        """Each badge in a README is an external network dependency on render
+        and a line of token overhead when Claude reads the file. 3 badges
+        is acceptable; more would be vanity bloat for a single-purpose plugin.
+        Keep badge count at most 3."""
+        import re as _re
+        readme = _read_text("README.md")
+        badges = _re.findall(r"!\[.*?\]\(https?://[^\)]+\)", readme)
+        assert len(badges) <= 3, (
+            f"README has {len(badges)} badge images. Each is an external HTTP "
+            f"request on render and a token-consuming line when Claude reads "
+            f"the file. Limit to 3 badges (CI status, version, license). "
+            f"Badges found: {badges}"
+        )
+
+    def test_readme_shields_io_badge_uses_flat_style(self):
+        """shields.io badge URLs without an explicit style default to 'flat',
+        which is fine. The concern is that shields.io 'for-the-badge' style
+        badges are significantly taller and generate larger SVGs (~2x byte
+        size). Verify no large-format badges are used."""
+        import re as _re
+        readme = _read_text("README.md")
+        badge_urls = _re.findall(r"https://img\.shields\.io/[^\)]+", readme)
+        large_format = [u for u in badge_urls if "for-the-badge" in u.lower()]
+        assert not large_format, (
+            f"shields.io 'for-the-badge' badges found: {large_format}. "
+            f"These generate ~2x larger SVGs than flat/flat-square styles. "
+            f"Use default flat style to minimize render payload."
         )

@@ -500,3 +500,174 @@ class TestRequiredFiles:
         assert has_command or has_agent or has_skill, (
             "Plugin must provide at least one command, agent, or skill"
         )
+
+
+# ─── 12. GitHub Actions Workflow Hygiene (Round 3) ───────────────────────────
+#
+# .github is in SKIP_DIRS so the general hygiene scanners never touch
+# .github/workflows/tests.yml.  These tests fill that gap with targeted
+# checks on the workflow file itself.
+
+
+class TestGitHubWorkflowHygiene:
+    """Targeted hygiene checks for .github/workflows/tests.yml.
+
+    Because SKIP_DIRS excludes .github from all general scanners, none of the
+    earlier tests (trailing whitespace, CRLF, final newline, YAML validity,
+    secrets) exercise the workflow file.  These tests close that gap and add
+    CI-specific quality gates.
+    """
+
+    WORKFLOW_PATH = PLUGIN_ROOT / ".github" / "workflows" / "tests.yml"
+
+    @pytest.fixture(autouse=True)
+    def require_workflow(self):
+        if not self.WORKFLOW_PATH.exists():
+            pytest.skip(".github/workflows/tests.yml does not exist")
+
+    # ── 12a. Basic text hygiene (mirrors skipped general tests) ──────────────
+
+    def test_workflow_no_trailing_whitespace(self):
+        """tests.yml must have no trailing whitespace on any line.
+
+        The general TestTrailingWhitespace scanner skips .github/ via SKIP_DIRS
+        so this check would otherwise go undetected.
+        """
+        content = self.WORKFLOW_PATH.read_text(encoding="utf-8")
+        violations = []
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            if line != line.rstrip(" \t"):
+                violations.append(f"line {lineno}: {line!r}")
+        assert violations == [], (
+            f".github/workflows/tests.yml has trailing whitespace: {violations}"
+        )
+
+    def test_workflow_no_crlf_line_endings(self):
+        """tests.yml must use LF line endings only.
+
+        The general TestLineEndings scanner skips .github/ via SKIP_DIRS.
+        """
+        raw = self.WORKFLOW_PATH.read_bytes()
+        assert b"\r\n" not in raw, (
+            ".github/workflows/tests.yml contains CRLF line endings (must be LF only)"
+        )
+
+    def test_workflow_ends_with_newline(self):
+        """tests.yml must end with a newline character (POSIX convention).
+
+        The general TestFinalNewline scanner skips .github/ via SKIP_DIRS.
+        """
+        raw = self.WORKFLOW_PATH.read_bytes()
+        assert len(raw) > 0 and raw.endswith(b"\n"), (
+            ".github/workflows/tests.yml does not end with a newline"
+        )
+
+    def test_workflow_yaml_is_valid(self):
+        """tests.yml must parse as valid YAML without errors."""
+        try:
+            import yaml
+        except ImportError:
+            pytest.skip("PyYAML not installed; cannot validate workflow YAML")
+
+        content = self.WORKFLOW_PATH.read_text(encoding="utf-8")
+        try:
+            yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            pytest.fail(
+                f".github/workflows/tests.yml is not valid YAML: {exc}"
+            )
+
+    def test_workflow_no_secrets_hardcoded(self):
+        """tests.yml must not contain hardcoded tokens or API keys.
+
+        The general TestNoSecrets scanner skips .github/ via SKIP_DIRS.
+        """
+        secret_patterns = ["ghp_", "gho_", "sk-", "PRIVATE KEY", "api_key="]
+        content = self.WORKFLOW_PATH.read_text(encoding="utf-8")
+        for pattern in secret_patterns:
+            assert pattern not in content, (
+                f".github/workflows/tests.yml contains suspect secret pattern: '{pattern}'"
+            )
+
+    # ── 12b. CI correctness and safety ───────────────────────────────────────
+
+    def test_workflow_has_timeout_minutes(self):
+        """The CI job must declare timeout-minutes to prevent runaway builds.
+
+        Without a timeout, a hung process (e.g. a test waiting on a
+        network resource) will consume CI minutes until the platform's
+        default 6-hour limit is reached.  A value of 15 minutes is
+        sufficient for the current test suite.
+        """
+        try:
+            import yaml
+        except ImportError:
+            pytest.skip("PyYAML not installed")
+
+        data = yaml.safe_load(self.WORKFLOW_PATH.read_text(encoding="utf-8"))
+        # PyYAML 1.1: bare 'on' key becomes boolean True
+        trigger_key = True if True in data else "on"
+        jobs = data.get("jobs", {})
+        assert jobs, ".github/workflows/tests.yml has no jobs defined"
+
+        for job_name, job_cfg in jobs.items():
+            assert "timeout-minutes" in job_cfg, (
+                f"Job '{job_name}' in tests.yml is missing 'timeout-minutes'. "
+                "Add e.g. 'timeout-minutes: 15' to prevent runaway CI builds."
+            )
+
+    def test_workflow_uses_pinned_action_shas_or_major_tags(self):
+        """Action references must use a version tag or SHA, never a bare branch name.
+
+        Using 'actions/checkout@main' would silently pick up upstream changes
+        and is a supply-chain risk.  Tags like '@v4' or full SHAs are required.
+        """
+        import re
+
+        content = self.WORKFLOW_PATH.read_text(encoding="utf-8")
+        # Find 'uses: owner/repo@ref' lines
+        unpinned = []
+        for lineno, line in enumerate(content.splitlines(), start=1):
+            m = re.search(r"uses:\s+\S+@(\S+)", line)
+            if m:
+                ref = m.group(1)
+                # Reject bare branch names: main, master, latest, HEAD, develop
+                if re.fullmatch(r"(main|master|latest|HEAD|develop)", ref, re.IGNORECASE):
+                    unpinned.append(f"line {lineno}: {line.strip()}")
+        assert unpinned == [], (
+            f"Workflow uses unpinned (branch-ref) action versions: {unpinned}. "
+            "Use a version tag (e.g. @v4) or a full commit SHA."
+        )
+
+
+# ─── 13. .gitignore *.html Pattern (Round 3) ─────────────────────────────────
+#
+# *.html was added to .gitignore in this round to suppress generated HTML
+# coverage/benchmark reports.  The existing parametrised tests only check
+# REQUIRED_PATTERNS and RECOMMENDED_PATTERNS, neither of which includes *.html.
+# This test pins the new pattern so it cannot be accidentally removed.
+
+
+class TestGitignoreHtmlPattern:
+    """The *.html pattern added in round 3 must remain in .gitignore."""
+
+    def test_html_pattern_in_gitignore(self):
+        """*.html must be present in .gitignore to suppress generated reports.
+
+        Added in round 3 to prevent HTML coverage/benchmark output from being
+        accidentally committed.  This test pins the pattern so it cannot be
+        silently removed in future edits.
+        """
+        gitignore_path = PLUGIN_ROOT / ".gitignore"
+        assert gitignore_path.exists(), ".gitignore is missing"
+
+        lines = [
+            line.strip()
+            for line in gitignore_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        assert "*.html" in lines, (
+            "*.html pattern is missing from .gitignore. "
+            "It was added in round 3 to suppress generated HTML reports; "
+            "do not remove it."
+        )

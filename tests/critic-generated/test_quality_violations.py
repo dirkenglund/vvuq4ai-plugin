@@ -1389,3 +1389,318 @@ class TestPrivacyHtmlStyle:
             assert "padding" in style, (
                 "privacy.html body has no padding. Text will touch screen edges on mobile."
             )
+
+
+# ===========================================================================
+# 16. README BADGE QUALITY (Round 3 Critic)
+# ===========================================================================
+
+
+class TestReadmeBadges:
+    """Badges in README.md must use correct URLs and be internally consistent."""
+
+    @pytest.fixture(scope="class")
+    def badge_img_urls(self, readme_text) -> list[str]:
+        """Extract all badge image URLs from README (![...](url) patterns)."""
+        return re.findall(r"!\[[^\]]*\]\(([^)]+)\)", readme_text)
+
+    @pytest.fixture(scope="class")
+    def badge_links(self, readme_text) -> list[tuple[str, str]]:
+        """Extract badge link pairs [![alt](img_url)](href_url) from README."""
+        return re.findall(r"\[!\[[^\]]*\]\(([^)]+)\)\]\(([^)]+)\)", readme_text)
+
+    def test_badges_use_https(self, badge_img_urls):
+        """All badge image URLs must use HTTPS."""
+        for url in badge_img_urls:
+            assert url.startswith("https://"), (
+                f"Badge image URL is not HTTPS: {url}"
+            )
+
+    def test_shields_io_badges_use_correct_domain(self, badge_img_urls):
+        """shields.io badges must reference img.shields.io, not shields.io directly."""
+        for url in badge_img_urls:
+            if "shields.io" in url:
+                assert "img.shields.io" in url, (
+                    f"Badge uses shields.io root instead of img.shields.io: {url}"
+                )
+
+    def test_version_badge_matches_plugin_json(self, readme_text, plugin_json):
+        """The hardcoded version in the README version badge must match plugin.json."""
+        version = plugin_json["version"]
+        # shields.io static badge format: /badge/version-X.Y.Z-color.svg
+        version_escaped = re.escape(version).replace(r"\.", "[.-]")
+        badge_pattern = re.compile(
+            rf"img\.shields\.io/badge/version[- ]{version_escaped}", re.IGNORECASE
+        )
+        assert badge_pattern.search(readme_text), (
+            f"README version badge does not match plugin.json version '{version}'. "
+            "Update the badge URL when bumping the version."
+        )
+
+    def test_ci_badge_references_existing_workflow_file(self, readme_text, plugin_root):
+        """The CI badge URL must reference a workflow file that actually exists."""
+        # Extract workflow filename from badge URLs like .../workflows/tests.yml/badge.svg
+        workflow_refs = re.findall(
+            r"github\.com/[^/]+/[^/]+/actions/workflows/([^/\"'\s)]+)/badge\.svg",
+            readme_text,
+        )
+        assert workflow_refs, (
+            "README has no GitHub Actions badge URL matching the expected pattern "
+            "(github.com/.../actions/workflows/<file>/badge.svg)"
+        )
+        for workflow_file in workflow_refs:
+            workflow_path = plugin_root / ".github" / "workflows" / workflow_file
+            assert workflow_path.exists(), (
+                f"CI badge references workflow '{workflow_file}' but "
+                f".github/workflows/{workflow_file} does not exist"
+            )
+
+    def test_ci_badge_repo_matches_plugin_json_repository(self, readme_text, plugin_json):
+        """The repo slug in the CI badge URL must match plugin.json repository."""
+        repo_url = plugin_json.get("repository", "")
+        # Extract owner/repo from repository URL
+        repo_match = re.search(r"github\.com/([^/]+/[^/\"'\s]+)", repo_url)
+        if not repo_match:
+            pytest.skip("plugin.json repository is not a GitHub URL")
+        repo_slug = repo_match.group(1).rstrip("/")
+
+        badge_repos = re.findall(
+            r"github\.com/([^/]+/[^/]+)/actions/workflows", readme_text
+        )
+        for badge_repo in badge_repos:
+            assert badge_repo == repo_slug, (
+                f"CI badge references repo '{badge_repo}' but plugin.json "
+                f"repository points to '{repo_slug}'"
+            )
+
+    @pytest.mark.xfail(reason="LICENSE badge links to relative file path (standard practice), not an HTTPS URL")
+    def test_badge_link_hrefs_use_https(self, badge_links):
+        """The href targets of badge links must use HTTPS."""
+        for img_url, href_url in badge_links:
+            assert href_url.startswith("https://"), (
+                f"Badge link href is not HTTPS: [{img_url}]({href_url})"
+            )
+
+    def test_mit_badge_links_to_license_file(self, badge_links, plugin_root):
+        """The MIT license badge should link to the local LICENSE file."""
+        for img_url, href_url in badge_links:
+            if "License-MIT" in img_url or "license-mit" in img_url.lower():
+                # Accept either local LICENSE or an opensource.org URL
+                valid = (
+                    href_url in ("LICENSE", "./LICENSE", "LICENSE.md")
+                    or "opensource.org" in href_url
+                    or "spdx.org" in href_url
+                )
+                assert valid, (
+                    f"MIT badge links to '{href_url}'. Expected local LICENSE file "
+                    "or a recognized license URL (opensource.org / spdx.org)."
+                )
+
+
+# ===========================================================================
+# 17. CI WORKFLOW QUALITY (Round 3 Critic)
+# ===========================================================================
+
+
+class TestCIWorkflowQuality:
+    """The GitHub Actions workflow must be safe and correctly configured."""
+
+    @pytest.fixture(scope="class")
+    def workflow_text(self, plugin_root) -> str:
+        path = plugin_root / ".github" / "workflows" / "tests.yml"
+        assert path.exists(), "tests.yml CI workflow not found"
+        return path.read_text()
+
+    def test_workflow_triggers_on_push_to_main(self, workflow_text):
+        """Workflow should trigger on push to main."""
+        assert "push" in workflow_text, "CI workflow missing push trigger"
+        assert "main" in workflow_text, "CI workflow push trigger does not reference main branch"
+
+    def test_workflow_triggers_on_pull_request(self, workflow_text):
+        """Workflow should trigger on pull requests to catch regressions."""
+        assert "pull_request" in workflow_text, (
+            "CI workflow missing pull_request trigger — PRs will not be validated"
+        )
+
+    def test_workflow_uses_supported_runner(self, workflow_text):
+        """Workflow must use a supported GitHub-hosted runner."""
+        supported_runners = ["ubuntu-latest", "ubuntu-22.04", "ubuntu-24.04", "macos-latest", "windows-latest"]
+        has_supported = any(runner in workflow_text for runner in supported_runners)
+        assert has_supported, (
+            f"CI workflow does not use a supported runner. "
+            f"Expected one of: {supported_runners}"
+        )
+
+    def test_workflow_uses_pinned_actions_checkout(self, workflow_text):
+        """actions/checkout should be pinned to a major version (v3 or v4)."""
+        assert re.search(r"actions/checkout@v[34]", workflow_text), (
+            "CI workflow should pin actions/checkout to v3 or v4 "
+            "(currently uses an unpinned or outdated version)"
+        )
+
+    def test_workflow_uses_pinned_setup_python(self, workflow_text):
+        """actions/setup-python should be pinned to a major version."""
+        assert re.search(r"actions/setup-python@v[45]", workflow_text), (
+            "CI workflow should pin actions/setup-python to v4 or v5"
+        )
+
+    def test_workflow_specifies_python_version(self, workflow_text):
+        """Workflow must declare an explicit Python version."""
+        assert re.search(r'python-version:\s*["\']?3\.\d+', workflow_text), (
+            "CI workflow does not specify an explicit Python version. "
+            "Omitting this can cause failures when GitHub changes the default."
+        )
+
+    def test_workflow_has_job_timeout(self, workflow_text):
+        """Jobs should have a timeout-minutes to prevent runaway builds.
+        Per project safety requirements, tests must not run indefinitely."""
+        assert "timeout-minutes" in workflow_text, (
+            "CI workflow job has no timeout-minutes. A hung test or network call "
+            "could block the runner indefinitely. Add 'timeout-minutes: 10' to the job."
+        )
+
+    def test_workflow_pytest_runs_critic_tests(self, workflow_text):
+        """The pytest invocation should include the critic-generated test directory."""
+        assert "tests/critic-generated" in workflow_text or (
+            "pytest" in workflow_text and "tests" in workflow_text
+        ), (
+            "CI workflow pytest command does not reference tests/critic-generated/"
+        )
+
+    def test_pyproject_toml_has_pytest_timeout(self, plugin_root):
+        """pyproject.toml should configure pytest timeout to prevent runaway tests.
+        Per project CLAUDE.md safety requirements (incident 2026-02-07), timeout = 30
+        must be set in [tool.pytest.ini_options]."""
+        pyproject = plugin_root / "pyproject.toml"
+        assert pyproject.exists(), (
+            "pyproject.toml not found. Create it and add "
+            "[tool.pytest.ini_options] with timeout = 30 per project safety requirements."
+        )
+        content = pyproject.read_text()
+        assert "timeout" in content, (
+            "pyproject.toml missing pytest timeout configuration. "
+            "Add [tool.pytest.ini_options] with 'timeout = 30' to prevent "
+            "runaway test processes (see CLAUDE.md incident 2026-02-07)."
+        )
+
+    def test_ci_installs_pytest_timeout_plugin(self, workflow_text):
+        """If pyproject.toml is absent, the CI pip install must include pytest-timeout.
+        The 'timeout' pytest.ini option has no effect without the pytest-timeout package."""
+        plugin_root = PLUGIN_ROOT
+        pyproject = plugin_root / "pyproject.toml"
+        if pyproject.exists() and "timeout" in pyproject.read_text():
+            # pyproject.toml configures timeout — verify the package is installed
+            pass
+        # Either way, if 'timeout' config is intended, the package must be installed
+        has_timeout_plugin = "pytest-timeout" in workflow_text
+        has_pyproject_with_timeout = (
+            pyproject.exists() and "timeout" in pyproject.read_text()
+        )
+        if has_pyproject_with_timeout:
+            assert has_timeout_plugin, (
+                "pyproject.toml configures pytest timeout but CI workflow does not "
+                "install pytest-timeout. Add 'pip install pytest pytest-timeout' to the workflow."
+            )
+
+
+# ===========================================================================
+# 18. README "WHAT CAN IT VERIFY?" TABLE — DOMAIN CONSISTENCY (Round 3 Critic)
+# ===========================================================================
+
+
+class TestReadmeDomainTableConsistency:
+    """The 'What Can It Verify?' domain table in README must be consistent with SKILL.md."""
+
+    @pytest.fixture(scope="class")
+    def skill_text(self, plugin_root) -> str:
+        return (plugin_root / "skills" / "verify-claim" / "SKILL.md").read_text()
+
+    def test_readme_domain_table_has_physics_row(self, readme_text):
+        """README domain table must include a physics constants row."""
+        assert re.search(r"\bPhysics\b", readme_text), (
+            "README 'What Can It Verify?' table missing a Physics domain row"
+        )
+
+    def test_readme_domain_table_has_ieee_row(self, readme_text):
+        """README domain table must include an IEEE standards row."""
+        assert re.search(r"\bIEEE\b", readme_text), (
+            "README 'What Can It Verify?' table missing IEEE domain row"
+        )
+
+    def test_readme_domain_table_has_math_row(self, readme_text):
+        """README domain table must include a mathematics row."""
+        assert re.search(r"[Mm]ath", readme_text), (
+            "README 'What Can It Verify?' table missing mathematics domain row"
+        )
+
+    def test_readme_domain_table_has_nsf_row(self, readme_text):
+        """README domain table must include an NSF row."""
+        assert "NSF" in readme_text, (
+            "README 'What Can It Verify?' table missing NSF domain row"
+        )
+
+    def test_readme_domain_table_has_photonics_row(self, readme_text):
+        """README domain table must include a photonics/EM row."""
+        assert re.search(r"[Pp]hotonics", readme_text), (
+            "README 'What Can It Verify?' table missing Photonics/EM domain row"
+        )
+
+    def test_readme_domains_consistent_with_skill_domains(self, readme_text, skill_text):
+        """Every domain mentioned in SKILL.md 'Domains Covered' must appear in README."""
+        # Extract domains from SKILL.md (bullet points under ## Domains Covered)
+        domains_section = re.search(
+            r"## Domains Covered\n(.*?)(?:\n##|\Z)", skill_text, re.DOTALL
+        )
+        if not domains_section:
+            pytest.skip("SKILL.md has no 'Domains Covered' section")
+        skill_domains_text = domains_section.group(1)
+        # Extract bolded domain names like **Physics**, **Mathematics**, etc.
+        skill_domains = re.findall(r"\*\*([^*]+)\*\*", skill_domains_text)
+        for domain in skill_domains:
+            # Use the first word of the domain name for a loose match
+            first_word = domain.split(":")[0].split("/")[0].strip()
+            assert first_word.lower() in readme_text.lower(), (
+                f"Domain '{domain}' documented in SKILL.md 'Domains Covered' "
+                f"is not mentioned in README 'What Can It Verify?' table. "
+                "Keep these in sync."
+            )
+
+    @pytest.mark.xfail(reason="SKILL.md 2.5 dB is an example of a FAILING value, not a threshold — README correctly shows only the threshold (3.0)")
+    def test_readme_com_threshold_matches_skill(self, readme_text, skill_text):
+        """The COM threshold value must be identical between README and SKILL.md."""
+        readme_com = re.findall(r"COM\b[^.]*?(\d+\.\d+)\s*dB", readme_text)
+        skill_com = re.findall(r"COM\b[^.]*?(\d+\.\d+)\s*dB", skill_text)
+        if readme_com and skill_com:
+            assert set(readme_com) == set(skill_com), (
+                f"COM threshold mismatch: README says {readme_com}, "
+                f"SKILL.md says {skill_com}. These must be identical."
+            )
+
+    def test_readme_ieee_standard_number_matches_skill(self, readme_text, skill_text):
+        """IEEE standard numbers referenced in README must also appear in SKILL.md."""
+        ieee_in_readme = set(re.findall(r"IEEE\s+802\.\d+\w*", readme_text))
+        ieee_in_skill = set(re.findall(r"IEEE\s+802\.\d+\w*", skill_text))
+        # Every IEEE standard in README should be in SKILL.md
+        readme_only = ieee_in_readme - ieee_in_skill
+        assert not readme_only, (
+            f"IEEE standards in README but missing from SKILL.md: {readme_only}. "
+            "SKILL.md should document all domains the plugin supports."
+        )
+
+    def test_readme_agent_subagent_type_matches_agent_name(self, readme_text, plugin_root):
+        """The subagent_type value cited in README must match the agent's frontmatter name."""
+        # Extract subagent_type value from README
+        subagent_match = re.search(r'subagent_type[:\s]+[`"\']?(\S+?)[`"\']?[.\s]', readme_text)
+        if not subagent_match:
+            pytest.skip("README does not reference subagent_type")
+        subagent_value = subagent_match.group(1).strip('`"\'')
+
+        # Read the agent frontmatter name
+        agent_text = (plugin_root / "agents" / "vvuq-verifier.md").read_text()
+        fm, _ = _parse_yaml_frontmatter(agent_text)
+        agent_name = fm.get("name", "") if fm else ""
+
+        assert subagent_value == agent_name, (
+            f"README references subagent_type: '{subagent_value}' but the agent "
+            f"frontmatter name is '{agent_name}'. These must match."
+        )

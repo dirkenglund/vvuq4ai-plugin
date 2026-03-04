@@ -20,7 +20,7 @@ Not all checks fire for every claim — the system applies whichever checks are 
 | Domain | Examples |
 |--------|----------|
 | **Physics constants** | Speed of light, Planck's constant, Boltzmann constant, gravitational constant, electron mass |
-| **Mathematical identities** | Derivatives, integrals, trigonometric identities, dimensional analysis |
+| **Mathematics** | Derivatives, integrals, trigonometric identities, dimensional analysis |
 | **IEEE 802.3 Ethernet** | COM threshold (>= 3.0 dB), insertion loss, TDECQ, return loss per IEEE 802.3ck |
 | **NSF Biosketch** | Section requirements, page limits, format compliance |
 | **Photonics/EM** | Device parameters, simulation validation, waveguide properties |
