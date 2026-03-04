@@ -14,5 +14,3 @@ dist/
 build/
 *.egg-info/
 *.html
-.pytest_cache/
-.benchmarks/
