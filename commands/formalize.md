@@ -49,29 +49,73 @@ For each equation, propose a MathObject with:
 
 Present ONE at a time. Both user AND critic must approve.
 
-### Phase 3: Create VVUQ Contract
+### Phase 3: Negotiate & Sign VVUQ Contract
 
-For each approved MathObject that has a Lean4 theorem, create a contract:
+For each approved MathObject that has a Lean4 theorem, negotiate a contract with VVUQ:
 
 ```bash
-# Create contract via VVUQ API
+# 1. Start negotiation — VVUQ proposes scope + price + solver
 VVUQ_API_KEY="$(gcloud secrets versions access latest --secret=VVUQ_API_KEY)"
-curl -s -X POST https://vvuq.dirkenglund.org/api/v1/contracts \
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/negotiations \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $VVUQ_API_KEY" \
   -d '{
-    "title": "<MathObject name>",
-    "description": "<what this proves>",
-    "claims": [{
-      "theorem": "<Lean4 theorem statement>",
-      "allowed_imports": ["Mathlib.Tactic", ...],
-      "mathlib_version": "v4.15.0"
-    }],
-    "issuer_agent_id": "vvuq4ai-formalize"
+    "query": "<MathObject description>",
+    "domain": "<domain>",
+    "requester_agent_id": "vvuq4ai-formalize",
+    "context": {
+      "math_objects": [{"name": "<name>", "lean4": "<Lean4 theorem>", "allowed_imports": ["Mathlib.Tactic"]}]
+    }
   }'
 ```
 
-Record the `contract_id` for each MathObject.
+Display VVUQ's proposal to the user:
+
+```
+VVUQ PROPOSAL (Round 1):
+  Scope: <scope_description>
+  Solver: <verification_method> (e.g., lean4, z3, sympy)
+  Claims:
+    1. <Lean4 theorem>
+  Price: <X credits>
+  Breakdown: <per-claim>
+  Expires: <expires_at>
+
+  [Accept] [Counter] [Reject]
+```
+
+**If user selects Counter**: Ask what to change (scope, price, claims), then:
+```bash
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/negotiations/<negotiation_id>/counter \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{
+    "agent_id": "vvuq4ai-formalize",
+    "modifications": {"proposed_price": <new_price>, "scope_description": "<new_scope>"},
+    "message": "<user reason>"
+  }'
+```
+Display VVUQ's re-proposal and repeat (max 5 rounds).
+
+**If user selects Accept**:
+```bash
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/negotiations/<negotiation_id>/accept \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{"agent_id": "vvuq4ai-formalize", "message": "Agreed"}'
+```
+Record the `contract_id` from the response. This MathObject now has a VVUQ contract.
+
+**If user selects Reject**:
+```bash
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/negotiations/<negotiation_id>/reject \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{"agent_id": "vvuq4ai-formalize", "message": "Not worth the price"}'
+```
+This MathObject proceeds without a VVUQ contract (pytest only).
+
+**Max 5 rounds per negotiation.** If expired, flag for manual review.
 
 ### Phase 4: Submit Proofs (iterate until ACCEPTED)
 

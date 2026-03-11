@@ -180,38 +180,95 @@ MathObject #1: quadratic_formula
 
 ---
 
-## Phase 3: VVUQ Contract Verification — AUTOMATED (no sign-off)
+## Phase 3: NEGOTIATE & SIGN VVUQ CONTRACT — INTERACTIVE
 
 For each dual-approved MathObject that has a Lean4 theorem:
 
-1. **Create contract** via `POST /api/v1/contracts`
-2. **Generate Lean4 proof** using appropriate tactics (field_simp, ring, nlinarith, etc.)
-3. **Submit proof** via `POST /api/v1/proofs/submit`
-4. **Poll status** via `GET /api/v1/verifications/{id}/status`
-5. **If REJECTED**: Read errors, fix proof, resubmit (up to 5 attempts)
-6. **If ACCEPTED**: Record contract_id and verification_id
+### 3a. Start Negotiation
 
-Report results to user:
+Query VVUQ's capabilities first, then start the negotiation:
+
+```bash
+# Check available solvers
+VVUQ_API_KEY="$(gcloud secrets versions access latest --secret=VVUQ_API_KEY)"
+curl -s https://vvuq.dirkenglund.org/api/v1/capabilities -H "X-API-Key: $VVUQ_API_KEY"
+
+# Start negotiation — VVUQ auto-selects solver and proposes price
+RESPONSE=$(curl -s -X POST https://vvuq.dirkenglund.org/api/v1/negotiations \
+  -H "Content-Type: application/json" -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{"query":"<MathObject description>","domain":"<domain>","requester_agent_id":"vvuq4ai-formalize","context":{"math_objects":[{"name":"<name>","lean4":"<theorem>","allowed_imports":["Mathlib.Tactic"]}]}}')
+```
+
+Extract `negotiation_id`, `proposal` (including `verification_method`, `solver_config`), `expires_at` from response.
+
+### 3b. Present Proposal to User
+
+Display the proposal clearly:
 
 ```
-VVUQ CONTRACT RESULTS:
+VVUQ NEGOTIATION — <MathObject name>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Round: 1 of 5
+Scope: <scope_description>
+Solver: <verification_method> (e.g., lean4 with Mathlib v4.15.0)
+
+Claims:
+  1. <Lean4 theorem statement>
+
+Price: <estimated_price> credits
+  Breakdown: <per-claim pricing>
+
+Expires: <expires_at>
+```
+
+Then use AskUserQuestion:
+- **Accept** — "I agree to this scope, solver, and price"
+- **Counter** — "I want to modify scope, price, solver, or claims"
+- **Reject** — "Not worth formalizing at this price"
+
+### 3c. Handle Counter
+
+If user selects Counter, ask via AskUserQuestion:
+- "What would you like to change? [Price / Scope / Claims / Solver / Multiple]"
+- Collect modifications
+- Submit counter: `POST /api/v1/negotiations/{id}/counter`
+- VVUQ re-prices and may suggest a different solver
+- Display VVUQ's re-proposal
+- Loop back to 3b (max 5 rounds)
+
+### 3d. Handle Accept
+
+`POST /api/v1/negotiations/{id}/accept` — auto-creates Contract.
+Record `contract_id` and `verification_method` for this MathObject.
+
+### 3e. Handle Reject
+
+`POST /api/v1/negotiations/{id}/reject`
+MathObject proceeds without VVUQ contract — use pytest verification only.
+
+### Report
+
+After all MathObjects are negotiated:
+
+```
+VVUQ NEGOTIATION RESULTS:
   MathObject #1 (quadratic_formula):
-    Contract: contract_2a8d51b1b8b3
-    Attempts: 3 (REJECTED → REJECTED → ACCEPTED)
-    Verification: verify_fb1c4e44462b4123
-    Verdict: ACCEPTED ✓
+    Negotiation: neg_abc123 → ACCEPTED (2 rounds)
+    Contract: contract_xyz789
+    Solver: lean4 (Mathlib v4.15.0)
+    Price: 5.0 credits
 
-  MathObject #3 (energy_conservation):
-    Contract: contract_abc123
-    Attempts: 1
-    Verification: verify_def456
-    Verdict: ACCEPTED ✓
+  MathObject #2 (energy_conservation):
+    Negotiation: neg_def456 → ACCEPTED (1 round)
+    Contract: contract_uvw012
+    Solver: sympy
+    Price: 1.5 credits
 
-  MathObject #2 (insertion_loss):
-    No Lean4 theorem (empirical value) — skip contract, use pytest
+  MathObject #3 (insertion_loss):
+    No Lean4 theorem (empirical) — SKIPPED
 ```
 
-This phase is automated — no sign-off needed because the VVUQ verification engine IS the independent reviewer. But results are shown to the user for transparency.
+This phase is interactive — the user negotiates scope, price, and solver with VVUQ before committing. Once ACCEPTED, contracts are auto-created and ready for Phase 4 proof submission.
 
 ---
 
