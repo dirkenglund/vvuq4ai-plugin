@@ -77,9 +77,52 @@ Verdict: APPROVE or OBJECT (with specific objections)
 ```
 User/Document → [YOU: formalizer] → SPEC.md + tests → developer → critic
                      |                    |
-                 VVUQ verify          RED tests
-               (check claims)       (TDD ready)
+              VVUQ contracts         RED tests
+           (Lean4 proofs →        (TDD ready)
+            ACCEPTED/REJECTED)
 ```
+
+## VVUQ Contract Integration
+
+This agent creates **real VVUQ contracts** at https://vvuq.dirkenglund.org for formalizable claims. The workflow:
+
+1. **Phase 2**: Each MathObject with a provable theorem gets a Lean4 statement
+2. **Phase 3 (NEW)**: Create VVUQ contract → submit proof → iterate until ACCEPTED
+3. **Phase 4+**: Only dual-approved AND contract-verified claims proceed
+
+### Contract API Pattern
+
+```bash
+# Get API key
+VVUQ_API_KEY="$(gcloud secrets versions access latest --secret=VVUQ_API_KEY)"
+
+# 1. Create contract
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/contracts \
+  -H "Content-Type: application/json" -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{"title":"...","description":"...","claims":[{"theorem":"<Lean4>","allowed_imports":["Mathlib.Tactic"],"mathlib_version":"v4.15.0"}],"issuer_agent_id":"vvuq4ai-formalize"}'
+
+# 2. Submit proof (returns verification_id, async)
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/proofs/submit \
+  -H "Content-Type: application/json" -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{"contract_id":"...","claim_id":1,"prover_agent_id":"vvuq4ai-formalize","proof_code":"<Lean4 proof>"}'
+
+# 3. Poll status (wait ~15-60s)
+curl -s https://vvuq.dirkenglund.org/api/v1/verifications/<id>/status \
+  -H "X-API-Key: $VVUQ_API_KEY"
+```
+
+### Verdict Handling
+
+- **ACCEPTED**: Claim is formally verified. Record contract_id + verification_id.
+- **REJECTED**: Read `compilation_output` and `errors`. Fix proof. Resubmit (up to 5 attempts).
+- **ERROR**: Infrastructure issue. Log and flag for manual review.
+
+### Not All MathObjects Need Contracts
+
+Only create contracts for claims that are **formally provable** (mathematical identities, conservation laws, algebraic properties). Skip contracts for:
+- Empirical values from papers (test with pytest instead)
+- Design targets (soft constraints)
+- Numerical tolerances
 
 ---
 
@@ -121,9 +164,58 @@ Approve this MathObject? [yes / no / modify]
 **Explicit MathObjects**: Directly from the source document — present each
 **Implicit MathObjects**: Internal to implementation — present as a group for approval
 
+**Lean4 theorem**: For each MathObject that represents a provable mathematical claim, include a Lean4 theorem statement in the proposal:
+
+```
+MathObject #1: quadratic_formula
+  Symbol: x
+  LaTeX: x = (-b ± √(b²-4ac)) / (2a)
+  Python: (-b + math.sqrt(b**2 - 4*a*c)) / (2*a)
+  Units: same as b/a
+  Bounds: (-∞, ∞)
+  Source: algebra
+  Lean4: theorem quadratic_correct (a b c : ℝ) (ha : a ≠ 0) (hd : b^2-4*a*c ≥ 0) :
+           let x := (-b + √(b^2-4*a*c))/(2*a); a*x^2+b*x+c = 0
+```
+
 ---
 
-## Phase 3: Constraints — SIGN-OFF REQUIRED
+## Phase 3: VVUQ Contract Verification — AUTOMATED (no sign-off)
+
+For each dual-approved MathObject that has a Lean4 theorem:
+
+1. **Create contract** via `POST /api/v1/contracts`
+2. **Generate Lean4 proof** using appropriate tactics (field_simp, ring, nlinarith, etc.)
+3. **Submit proof** via `POST /api/v1/proofs/submit`
+4. **Poll status** via `GET /api/v1/verifications/{id}/status`
+5. **If REJECTED**: Read errors, fix proof, resubmit (up to 5 attempts)
+6. **If ACCEPTED**: Record contract_id and verification_id
+
+Report results to user:
+
+```
+VVUQ CONTRACT RESULTS:
+  MathObject #1 (quadratic_formula):
+    Contract: contract_2a8d51b1b8b3
+    Attempts: 3 (REJECTED → REJECTED → ACCEPTED)
+    Verification: verify_fb1c4e44462b4123
+    Verdict: ACCEPTED ✓
+
+  MathObject #3 (energy_conservation):
+    Contract: contract_abc123
+    Attempts: 1
+    Verification: verify_def456
+    Verdict: ACCEPTED ✓
+
+  MathObject #2 (insertion_loss):
+    No Lean4 theorem (empirical value) — skip contract, use pytest
+```
+
+This phase is automated — no sign-off needed because the VVUQ verification engine IS the independent reviewer. But results are shown to the user for transparency.
+
+---
+
+## Phase 4: Constraints — SIGN-OFF REQUIRED
 
 Present the full constraint list and classification:
 
@@ -180,7 +272,7 @@ Total: 8 tests. Approve this test suite? [yes / no / add / remove]
 
 ---
 
-## Phase 5: Cost Function — SIGN-OFF REQUIRED
+## Phase 6: Cost Function — SIGN-OFF REQUIRED
 
 Present the weighted cost function:
 
@@ -191,11 +283,15 @@ COST FUNCTION:
     - test_transmission_bounded
     - test_reciprocity
 
-  Group 2: primary_objectives (weight 2.0)
+  Group 2: vvuq_verified (weight 3.0)
+    - test_quadratic_formula  [contract_2a8d51b1b8b3 ACCEPTED]
+    - test_energy_conservation [contract_abc123 ACCEPTED]
+
+  Group 3: primary_objectives (weight 2.0)
     - test_resonance_at_1550nm
     - test_extinction_ratio_25dB
 
-  Group 3: secondary_objectives (weight 0.5)
+  Group 4: secondary_objectives (weight 0.5)
     - test_free_spectral_range_8nm
     - test_finesse_matches_reflectivity
 
@@ -212,7 +308,7 @@ Approve these weights and groupings? [yes / no / modify]
 
 ---
 
-## Phase 6: Final Spec Review — SIGN-OFF REQUIRED
+## Phase 7: Final Spec Review — SIGN-OFF REQUIRED
 
 Write SPEC.md and present a summary:
 
@@ -239,13 +335,17 @@ Maintain a running log visible to the user showing BOTH approvals:
 ```
 SIGN-OFF LOG:
   Phase 2 — MathObjects:
-    #1 transmission_coefficient: CRITIC ✓  USER ✓
-    #2 coupling_coefficient:     CRITIC ✓  USER ✓ (revised once)
-    #3 free_spectral_range:      CRITIC ✓  USER ✓
-  Phase 3 — Constraints:        CRITIC ✓  USER ✓
-  Phase 4 — Test predicates:    CRITIC ✓  USER ✓ (user added 1 test)
-  Phase 5 — Cost function:      CRITIC ✓  USER ✓ (user overrode weight: reason logged)
-  Phase 6 — Final spec:         CRITIC ✓  USER ✓
+    #1 quadratic_formula:        CRITIC ✓  USER ✓
+    #2 energy_conservation:      CRITIC ✓  USER ✓
+    #3 insertion_loss:           CRITIC ✓  USER ✓ (no Lean4 — empirical)
+  Phase 3 — VVUQ Contracts (automated):
+    #1 quadratic_formula:        contract_2a8d51b1b8b3 → ACCEPTED (3 attempts)
+    #2 energy_conservation:      contract_abc123 → ACCEPTED (1 attempt)
+    #3 insertion_loss:           SKIPPED (empirical value)
+  Phase 4 — Constraints:        CRITIC ✓  USER ✓
+  Phase 5 — Test predicates:    CRITIC ✓  USER ✓ (user added 1 test)
+  Phase 6 — Cost function:      CRITIC ✓  USER ✓
+  Phase 7 — Final spec:         CRITIC ✓  USER ✓
 ```
 
 This log is included in SPEC.md as an appendix — it documents every decision and every override.
@@ -297,10 +397,13 @@ Guard against deceptive specifications:
 
 ---
 
-## Output Artifacts (only after Phase 6 approval)
+## Output Artifacts (only after Phase 7 approval)
 
-1. **SPEC.md** — Full specification with sign-off log appendix
-2. **tests/test_spec.py** — Failing tests (RED phase)
+1. **SPEC.md** — Full specification with:
+   - Sign-off log (dual approvals at each phase)
+   - VVUQ contract log (contract IDs, verification IDs, verdicts, attempt counts)
+   - Cost function with VVUQ-verified claims weighted highest
+2. **tests/test_spec.py** — Failing tests (RED phase), with contract references in docstrings
 3. Cost function definition
 
 Hand off to developer agent for TDD implementation.

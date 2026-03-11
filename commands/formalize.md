@@ -1,20 +1,20 @@
 ---
 name: formalize
-description: "Interactive formalization — extract equations, constraints, and test predicates from papers or design goals, then generate a verified specification"
+description: "Interactive formalization with VVUQ contract verification — extract claims, create contracts, submit proofs, iterate until ACCEPTED"
 argument-hint: "<paper/goal description> [domain]"
-allowed-tools: ["Task", "Read", "Write", "Edit", "MultiEdit", "Grep", "Glob", "TodoWrite", "Bash", "WebFetch"]
+allowed-tools: ["Task", "Read", "Write", "Edit", "MultiEdit", "Grep", "Glob", "TodoWrite", "Bash", "WebFetch", "AskUserQuestion"]
 ---
 
-# /formalize — Interactive Specification from Source
+# /formalize — Contract-Verified Formalization
 
-Generate a formal, testable specification from a paper, design goal, or requirements document. Produces SPEC.md with MathObjects, test predicates, and a cost function — then verifies key claims via VVUQ.
+Generate a formal specification from a paper or design goal. Key claims become **VVUQ contracts** with Lean4 theorem statements. Proofs are submitted and must be **ACCEPTED** by the VVUQ verification engine before the spec is finalized.
 
 ## Usage
 
 ```bash
-/vvuq4ai:formalize "Fabry-Perot cavity with finesse >100"
-/vvuq4ai:formalize "squeezed light interferometer from arxiv:2301.12345"
-/vvuq4ai:formalize "RC low-pass filter with 1kHz cutoff" circuit
+/vvuq4ai:formalize "quadratic formula correctness"
+/vvuq4ai:formalize "Fabry-Perot cavity with finesse >100" photonic
+/vvuq4ai:formalize "energy conservation in ring resonator" photonic
 ```
 
 ## Domains
@@ -29,90 +29,124 @@ Generate a formal, testable specification from a paper, design goal, or requirem
 
 **Description**: $ARGUMENTS
 
-Starting interactive formalization...
+Starting contract-verified formalization...
 
 ### Phase 1: Source Ingestion
 
-1. Parse source document (PDF, paper, or user description)
-2. Extract equations, assumptions, key claims, figure data
-3. Identify domain and relevant physics/engineering constraints
-4. Search VVUQ knowledge base for related verified facts:
+1. Parse source (PDF, paper, user description)
+2. Extract equations, assumptions, key claims
+3. Identify domain
+4. Search VVUQ knowledge base:
    ```
-   vvuq_resolve(query="<key equation or claim from source>")
+   vvuq_resolve(query="<key claim>")
    ```
 
-### Phase 2: Interactive MathObject Identification
+### Phase 2: MathObject Identification (dual sign-off)
 
-For each equation/relationship found, propose a MathObject:
+For each equation, propose a MathObject with:
+- Name, symbol, LaTeX, Python expression, units, bounds
+- **Lean4 theorem statement** — the formal claim to verify
 
+Present ONE at a time. Both user AND critic must approve.
+
+### Phase 3: Create VVUQ Contract
+
+For each approved MathObject that has a Lean4 theorem, create a contract:
+
+```bash
+# Create contract via VVUQ API
+VVUQ_API_KEY="$(gcloud secrets versions access latest --secret=VVUQ_API_KEY)"
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/contracts \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{
+    "title": "<MathObject name>",
+    "description": "<what this proves>",
+    "claims": [{
+      "theorem": "<Lean4 theorem statement>",
+      "allowed_imports": ["Mathlib.Tactic", ...],
+      "mathlib_version": "v4.15.0"
+    }],
+    "issuer_agent_id": "vvuq4ai-formalize"
+  }'
 ```
-MathObject: <name>
-  Symbol: <symbol>
-  LaTeX: <equation>
-  Python: <expression>
-  Units: <pint units>
-  Bounds: (<min>, <max>)
-  Source: <paper ref or "design goal">
+
+Record the `contract_id` for each MathObject.
+
+### Phase 4: Submit Proofs (iterate until ACCEPTED)
+
+For each contract, generate a Lean4 proof and submit:
+
+```bash
+curl -s -X POST https://vvuq.dirkenglund.org/api/v1/proofs/submit \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $VVUQ_API_KEY" \
+  -d '{
+    "contract_id": "<contract_id>",
+    "claim_id": 1,
+    "prover_agent_id": "vvuq4ai-formalize",
+    "proof_code": "<Lean4 proof>"
+  }'
 ```
 
-Present each to user for confirmation. Ask clarifying questions one at a time.
+Poll for result:
+```bash
+curl -s https://vvuq.dirkenglund.org/api/v1/verifications/<verification_id>/status \
+  -H "X-API-Key: $VVUQ_API_KEY"
+```
 
-### Phase 3: Constraint Classification
+**If REJECTED**: Read the error, fix the proof, resubmit. Up to 5 attempts per claim.
 
-Classify all constraints:
-- **Hard constraints**: Physical laws (energy conservation, unitarity, causality)
-- **Soft constraints**: Design targets (bandwidth > X, loss < Y)
-- **Parameter bounds**: Valid ranges for each variable
+**If ACCEPTED**: Record verification_id. This MathObject is formally verified.
 
-### Phase 4: Test Predicate Generation
+**If ERROR**: Log and flag for manual review.
 
-Generate failing tests (RED phase) from the specification:
+### Phase 5: Constraint Classification (dual sign-off)
+
+Classify constraints:
+- **Hard constraints**: Physical laws (VVUQ-verified via contracts)
+- **Soft constraints**: Design targets
+- **Parameter bounds**: Valid ranges
+
+### Phase 6: Test Predicate Generation (dual sign-off)
+
+Generate pytest tests. For VVUQ-verified claims, reference the contract:
 
 ```python
-# Explicit tests — from paper figures/equations
-def test_resonance_at_expected_wavelength():
-    """Source: Fig. 3, λ_res = 1550.2 nm"""
-    ...
-
-# Implicit tests — internal consistency
-def test_energy_conservation():
-    """Physics: |S11|² + |S21|² ≤ 1"""
-    ...
-
-# VVUQ-verified tests — checked against knowledge base
-def test_physical_constants_correct():
-    """VVUQ: speed of light, Planck's constant"""
-    ...
+def test_quadratic_formula():
+    """VVUQ Contract: contract_2a8d51b1b8b3 — ACCEPTED
+    Theorem: ∀ a b c, a≠0 → b²-4ac≥0 → a·x²+b·x+c = 0
+    """
+    a, b, c = 1.0, -3.0, 2.0
+    x = (-b + math.sqrt(b**2 - 4*a*c)) / (2*a)
+    assert abs(a*x**2 + b*x + c) < 1e-10
 ```
 
-### Phase 5: Cost Function
+### Phase 7: Cost Function (dual sign-off)
 
-Define weighted cost function from test predicates:
-
+Weight verified claims higher:
 ```python
 cost_function = {
-    "hard_constraints": {"energy_conservation": 1.0},
-    "primary_objectives": {"fig3_agreement": 2.0},
-    "secondary_objectives": {"bandwidth_target": 0.5},
+    "vvuq_verified": {"weight": 3.0, "tests": [...]},    # Contract ACCEPTED
+    "hard_constraints": {"weight": 1.0, "tests": [...]},  # Physics laws
+    "design_targets": {"weight": 0.5, "tests": [...]},    # Soft goals
 }
 ```
 
-### Phase 6: VVUQ Verification of Spec
+### Phase 8: Final Spec (dual sign-off)
 
-Verify key claims in the specification:
+Output:
+1. **SPEC.md** — with contract IDs, verification IDs, and sign-off log
+2. **tests/test_spec.py** — failing tests (RED state)
+3. Cost function with VVUQ verification weights
+
+```markdown
+## VVUQ Contract Log
+| MathObject | Contract ID | Verdict | Verification ID | Attempts |
+|---|---|---|---|---|
+| quadratic_formula | contract_2a8d51b1b8b3 | ACCEPTED | verify_fb1c4e44462b4123 | 3 |
 ```
-vvuq_resolve(query="<each key equation/constant in spec>")
-```
-
-Flag any discrepancies before handing off to implementation.
-
-### Phase 7: Output
-
-Generate:
-1. `SPEC.md` — human-readable specification
-2. `tests/test_spec.py` — failing tests (RED state)
-3. Cost function definition
 
 Hand off to developer agent for TDD implementation.
 
-**Initiating interactive formalization...**
+**Initiating contract-verified formalization...**
