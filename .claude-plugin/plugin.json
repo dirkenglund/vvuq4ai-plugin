@@ -1,0 +1,16 @@
+{
+  "name": "vvuq4ai",
+  "version": "0.3.0",
+  "description": "VVUQ4AI — Verify AI-generated STEM claims against curated knowledge bases, IEEE standards, and mathematical checks.",
+  "privacyPolicy": "https://vvuq.dirkenglund.org/privacy",
+  "author": {
+    "name": "Dirk Englund",
+    "email": "englund@mit.edu",
+    "url": "https://vvuq.dirkenglund.org"
+  },
+  "homepage": "https://vvuq.dirkenglund.org",
+  "repository": "https://github.com/dirkenglund/vvuq4ai-plugin",
+  "license": "MIT",
+  "keywords": ["verification", "validation", "stem", "physics", "ieee", "standards", "math"],
+  "mcpServers": "./.mcp.json"
+}
